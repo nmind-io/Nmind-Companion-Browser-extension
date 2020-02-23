@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+		<title>Nmind Companion</title>
+		<link rel="stylesheet" 
+			href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css" 
+			integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" 
+			crossorigin="anonymous" />
+		<script
+			  src="https://code.jquery.com/jquery-3.4.1.slim.min.js"
+			  integrity="sha256-pasqAKBDmFT4eHoN2ndd6lN370kFiGUFyTiUHWhU7k8="
+			  crossorigin="anonymous"></script>
+		<script 
+			src="https://code.jquery.com/jquery-3.4.1.slim.min.js" 
+			integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" 
+			crossorigin="anonymous"></script>
+		<script 
+			src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js" 
+			integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" 
+			crossorigin="anonymous"></script>
+		<script 
+			src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js" 
+			integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6" 
+			crossorigin="anonymous"></script>
+
+		<script 
+			src="https://cdn.jsdelivr.net/npm/sweetalert2@9"
+			crossorigin="anonymous"></script>
+	</head>
+
+	<body class="container-fluid bg-ligth" style="width: 800px;">
+		
+		<div class="row">
+			<fieldset class="border m-2 p-2 bg-white shadow-sm rounded col">
+				<legend class="w-auto p-1">Version</legend>
+				<input id="extension-version" type="button" class="btn btn-primary m-1"
+					value="Extension version"
+				/>
+				<input id="auto-companion-version" type="button" class="btn btn-primary m-1"
+					value="Host version" 
+					data-route="companion.version"
+				/>
+			</fieldset>
+
+			<fieldset class="border m-2 p-2 bg-white shadow-sm rounded col">
+				<legend class="w-auto p-1">Ping</legend>
+				<input id="auto-content-ping" type="button" class="btn btn-primary m-1"
+					value="content-ping" 
+					data-route="content.ping"
+				/>
+				<input id="auto-content-ping-async" type="button" class="btn btn-primary m-1"
+					value="content-ping (Async)"
+					data-route="content.ping" data-async="true"
+				/>
+				<input id="auto-content-ping-delay" type="button" class="btn btn-primary m-1" 
+					value="content-ping (Delay 1000)" 
+					data-route="content.ping" data-delay="1000"
+				/>
+
+				<input id="auto-background-ping" type="button" class="btn btn-primary m-1"
+					value="background-ping" 
+					data-route="background.ping"
+				/>
+				<input id="auto-host-ping" type="button" class="btn btn-primary m-1"
+					value="host-ping" 
+					data-route="companion.ping"
+				/>
+			</fieldset>
+
+		</div>
+		
+		<div class="row">		
+			<fieldset class="border m-2 p-2 bg-white shadow-sm rounded col">
+				<legend class="w-auto p-1">Content</legend>
+
+				<input id="auto-content-addition" type="button" class="btn btn-primary m-1"
+					value="Additionner 2 et 3" 
+					data-route="content.addition" data-params="[2,3]"
+				/>
+				<input id="auto-content-soustraction" type="button"  class="btn btn-primary m-1"
+					value="Soustraire 2 de 3 (unknown)" 
+					data-route="content.soustraction" data-params="[2,3]"
+				/>
+				<input id="auto-content-multiplication" type="button"  class="btn btn-primary m-1"
+					value="Multiplier 7 de 8" 
+					data-route="content.multiplication"
+					data-params="[7,8]" />
+					
+			</fieldset>
+		
+			<fieldset class="border m-2 p-2 bg-white shadow-sm rounded col">
+				<legend class="w-auto p-1">Background</legend>
+				<input id="auto-background-addition" type="button"  class="btn btn-primary m-1"
+					value="Additionner 3 et 9" 
+					data-route="background.addition" data-params="[3,9]"
+				/>
+				<input id="auto-background-multiplication" type="button"  class="btn btn-primary m-1"
+					value="Multiplier 2 de 4" 
+					data-route="background.multiplication" data-params="[2,4]"
+				/>
+
+				<input id="companion-pdf-download" type="button" class="btn btn-primary m-1" 
+					value="Télécharger le PDF Seb Sauvage"
+				/>
+				<input id="auto-companion-location-download" type="button" class="btn btn-primary m-1"
+					value="Ouvrir le dossier downloads" 
+					data-route="companion.location.open.download"
+				/>
+				<input id="auto-companion-capabilities" type="button" class="btn btn-primary m-1"
+					value="Capacités" 
+					data-route="companion.capabilities"
+				/>
+			</fieldset>
+
+		</div>
+		
+		<div class="row">
+			<fieldset class="border m-2 p-2 bg-white shadow-sm rounded col">
+				<legend class="w-auto p-1">Host</legend>
+
+				<input id="auto-companion-connect" type="button" class="btn btn-primary m-1"
+					value="Host-connect" 
+					data-route="companion.connect"
+				/>
+				<input id="auto-companion-disconnect" type="button" class="btn btn-primary m-1"
+					value="Host-disconnect" 
+					data-route="companion.disconnect"
+				/>
+				<input id="auto-companion-isConnected" type="button" class="btn btn-primary m-1"
+					value="Host-isConnected" 
+					data-route="companion.isConnected"
+				/>
+
+				<input id="companion-pdf-print" type="button" class="btn btn-primary m-1"
+					value="Imprimer le PDF Seb Sauvage"
+				/>
+				<input id="auto-companion-printers-list" type="button" class="btn btn-primary m-1"
+					value="Liste des imprimantes" 
+					data-route="companion.printers.list"
+				/>
+			</fieldset>
+
+			<fieldset class="border m-2 p-2 bg-white shadow-sm rounded col">
+				<legend class="w-auto p-1">Nmind</legend>
+
+				<br />
+				<br />
+				
+				<div class="input-group">
+					<div class="input-group-prepend">
+						<span class="input-group-text">TPE</span>
+						<button id="companion-pos-ping" type="button" class="btn btn-outline-primary">
+							<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+							ping
+						</button>
+						<span class="input-group-text">&euro;</span>
+					</div>
+
+					<input id="companion-pos-amount" class="form-control" type="text" 
+						placeholder="Montant" 
+						onkeypress="return (event.charCode >= 48 && event.charCode <= 57) || event.charCode == 46 || event.charCode == 0 "
+					/>
+					<div class="input-group-append">
+						<button id="companion-pos-pay" type="button" class="btn btn-outline-danger">
+							<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+							TPE - Payer
+						</button>
+					</div>
+
+				</div>
+
+			</fieldset>
+
+		</div>
+	
+	</body>
+<script>
+
+function swalAlert(__icon, __title,  __message){
+	Swal.fire({ 
+		icon: __icon, 
+		title : __title, 
+		html  : __message == undefined ? "" : __message, 
+		timer : 3000, 
+		timerProgressBar : true 
+	});
+}
+
+document.addEventListener('supportClient.ready', function(e){
+
+	document.body.style.border = "5px solid red";
+
+	window.supportClient.on('companion.document.print.response', function(response){
+
+		if(response.success){
+
+			swalAlert('success', 'Impression',
+				"le document " + response.name + "(" + response.id + ")"
+				+ " a été imprimé sur " + response.printerName
+			);
+
+		} else {
+
+			swalAlert('error', 'Impression',
+				"le document " + response.name + "(" + response.id + ")"
+				+ " n'a pas pu être imprimé sur " + response.printerName + " : " + response.reason
+			);
+
+		}
+
+	});
+	
+	window.supportClient.on('companion.document.download.response', function(response){
+		if(response.success){
+
+			swalAlert('success', 'Téléchargement',
+				"le document " + response.name + "(" + response.id + ")"
+				+ " a été téléchargé dans " + response.destination
+			);
+
+		} else {
+
+			swalAlert('error', 'Téléchargement',
+				"le document " + response.name + "(" + response.id + ")"
+				+ " n'a pas pu être téléchargé : " + response.reason
+			);
+
+		}
+		
+	});
+	
+}, false);
+
+jQuery.noConflict();
+
+jQuery(document).ready(function($){
+
+	$("[id|=auto]").on("click", function(e){
+
+		var route = jQuery(this).data("route");
+		
+		if(typeof  route !== 'string' ){
+			swalAlert('error', 'Auto-route',
+				$(this).attr('id') + " -> pas de route définie"
+			);
+			return;
+		}
+		
+		var request = window.supportClient.create(route, $(this).data("params"));
+		request.async = $(this).data("async") || false;
+		request.silent = $(this).data("silent") || false;
+		request.delay = $(this).data("delay") || 0;
+		
+		if(request.async){
+			window.supportClient.send(request);
+		} else {
+		
+			window.supportClient.send(request).then(function(response){
+				swalAlert('success', 'Auto-route (' + response.code + ')', response.content);
+			}).catch(function(response){
+				swalAlert('error', 'Auto-route (' + response.code + ')', response.message);
+			});
+		}
+		
+	});
+	
+	$("#extension-version").on("click", function(){
+		if(window.supportClient && window.supportClient.version("Support Companion")){
+		
+			window.supportClient.version().then(function (response) {
+				swalAlert('success', 'Version ' + response.content);
+			}).catch(function (response) {
+				swalAlert('error', 'Verion', response.code + " - " + response.message);
+			});
+			
+		} else {
+			swalAlert('error', 'Companion', "L'extension Companion n'est pas installée");
+		}
+	});
+
+	$("#companion-pdf-download").on("click", function(){
+	
+		var job = {
+			url : 'https://sebsauvage.net/pdf/pdfgratuit.pdf',
+			conflictAction : 'uniquify',
+			filename : 'pdfgratuit.pdf',
+			headers : [],
+			method : 'GET',
+			saveAs : false,
+			id : 10,
+			name : 'Le PDF de Seb Sauvage'
+		}
+		
+		window.supportClient.send('companion.document.download', job).then(function(response){
+			swalAlert('success', 'Téléchargement',
+				response.code + " - Le téléchargement " + response.content.name + " a été lancé"
+			);
+		}).catch(function(response){
+			swalAlert('error', 'Téléchargement', response.code + " - " + response.message);
+		});
+		
+	});
+
+	$("#companion-pdf-print").on("click", function(){
+	
+		var job = {
+			url : 'https://sebsauvage.net/pdf/pdfgratuit.pdf',
+			conflictAction : 'uniquify',
+			filename : 'pdfgratuit.pdf',
+			headers : [],
+			method : 'GET',
+			saveAs : false,
+			id : 10,
+			name : 'Le PDF de Seb Sauvage'
+		}
+		
+		window.supportClient.send('companion.document.print', job).then(function(response){
+			swalAlert('success', 'Impression',
+				response.code + " - Le téléchargement " + response.content.name + " a démarré"
+			);
+		}).catch(function(response){
+			swalAlert('error', 'Impression', response.code + " - " + response.message);
+		});
+		
+	});
+	
+	$('#companion-pos-ping').on("click", function(){
+		var $this = $(this);
+        $this.children('.spinner-border').show();
+		$this.prop('disabled', true);
+			
+		window.supportClient.send('companion.pos.ping').then(function(response){
+			swalAlert('success', 'POS Payment', "Le test a réussi");
+
+		}).catch(function(response){
+			swalAlert('error', 'POS Payment', response.code + " - " + response.message);
+
+		}).finally(function(){
+            $this.children('.spinner-border').hide();
+			$this.prop('disabled', false);
+			
+    	});
+	});
+
+	$('#companion-pos-pay').on("click", function(){
+		var $this = $(this);
+        $this.children('.spinner-border').show();
+		$this.prop('disabled', true);
+
+		var amount = parseFloat($('#companion-pos-amount').val());
+
+		if(isNaN(amount) || amount <= 0){
+			swalAlert('error', 'POS Payment', "Vous devez saisir un montant à payer");
+			return;
+		}
+
+		swalAlert('success', 'POS Payment', 
+			`Le paiement de ${amount} € a été demandé, veuillez attendre la fin de la transaction `
+		);
+
+		window.supportClient.send('companion.pos.process', amount).then(function(response){
+			swalAlert('success', 'POS Payment', 
+				response.code + ` - Le paiement de ${amount} € a été accepté `
+			);
+		}).catch(function(response){
+			swalAlert('error', 'POS Payment', 
+				response.code + ` - Le paiement de ${amount} € a été refusé ou annulé (${response.message})`
+			);
+
+		}).finally(function(){
+			$this.children('.spinner-border').hide();
+			$this.prop('disabled', false);
+			
+		});
+
+	});
+
+});
+
+</script>
+</html>

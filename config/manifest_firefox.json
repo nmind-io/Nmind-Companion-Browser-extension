@@ -1,0 +1,12 @@
+{
+	"browser_specific_settings": {
+		"gecko": {
+			"id": "nmind-companion@nmind.io",
+			"strict_min_version": "50",
+			"update_url": "https://nmind.io/companion/updates.json"
+		}
+	},
+	"options_ui": {
+		"browser_style": true
+	}
+}

@@ -1,0 +1,14 @@
+{
+	"env": "development",
+	"runner": {
+		"enable": true
+	},
+	"firefox" : {
+
+	}, 
+	"chrome" : {
+		"runner": {
+			"enable": false
+		}
+	}
+}

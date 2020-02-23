@@ -1,0 +1,10 @@
+{
+  "appName": {
+    "message": "Ext Starter",
+    "description": "Le nom de l'extension"
+  },
+  "appDescription": {
+    "message": "Cadre général pour extensions multi-navigateur",
+    "description": "La description de l'extension"
+  }
+}

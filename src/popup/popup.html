@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+		<title>Nmind Companion</title>
+		<link rel="stylesheet" href="../assets/styles/bootstrap.min.css" />
+		<link rel="stylesheet" href="../assets/styles/fontawesome-free-5.12.1-web/css/all.min.css" />
+        <script src="../lib/jquery-3.4.1.slim.min.js"></script>
+        <script src="../lib/popper.min.js"></script>
+        <script src="../lib/bootstrap.min.js"></script>
+        <script src="../lib/sweetalert-2.9.min.js"></script>
+		<script src="../bundles/popup.js" defer></script>
+		<style>
+			body {
+				width: 450px;
+			}
+
+			#content {
+				height: 430px; 
+			}
+
+			#footer {
+				margin-top: 10px;
+			}
+
+			#footer a {
+				font-size: 0.9em;
+			}
+
+		</style>
+	</head>
+	<body class="bg-light">
+	<div class="container-fluid">
+	
+		<div id="header" class="row p-1 border-bottom bg-white align-items-center">
+			<div class="col-2" >
+				<img id="companion-logo" src="../assets/images/companion-logo.png" 
+					alt="Nmind Companion" 
+					title="Nmind Companion" 
+					height="30" width="30"/>
+			</div>
+			<div class="col">
+				<h2 id="companion-name" class="font-bolder">Nmind Companion</h2>
+			</div>
+			<div class="col-3 text-right">
+				<button id="window-trigger-refresh" type="button" class="btn btn-outline-primary btn-sm" aria-label="Refresh">
+					<span class="fas fa-redo"></span>
+				</button>
+				<button id="window-trigger-close" type="button" class="btn btn-outline-primary btn-sm" aria-label="Close">
+					<span class="fas fa-times"></span>
+				</button>
+			</div>
+		</div>
+		
+		<form id="content" class="row overflow-auto">
+			<div class="col">
+				<fieldset class="border p-2 bg-white shadow-sm rounded">
+					<legend class="w-auto p-0">Imprimantes</legend>
+					
+					<div class="form-group form-check">
+						<input id="options-printer-activate" value="true" type="checkbox" class="form-check-input sync-trigger">
+						<label for="options-printer-activate" class="form-check-label">
+							Activer la prise en charge des imprimantes
+						</label> 
+					</div>
+					
+					<div class="form-group">
+						<label for="options-printer-default">Imprimante par défaut</label>
+						<select id="options-printer-default" class="form-control sync-trigger">
+						</select>
+					</div>
+					
+					<div class="form-group">
+						<button id="options-printer-trigger-test" type="button" class="btn btn-outline-secondary btn-sm sync-trigger">
+							<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+							Imprimer une page de test
+						</button>
+					</div>
+					
+				</fieldset>
+			
+				<fieldset class="border p-2 bg-white shadow-sm rounded">
+					<legend class="w-auto p-1">Terminal de paiement</legend>
+					
+					<div class="form-group form-check">
+						<input id="options-pos-activate" value="true" type="checkbox" class="form-check-input sync-trigger">
+						<label for="options-pos-activate" class="form-check-label">
+							Activer la prise en charge du terminal de paiement
+						</label> 
+					</div>
+					
+					<div class="row">
+						<div class="form-group col">
+							<label for="options-pos-device">Modèle de terminal</label> 
+							<select id="options-pos-device" class="form-control sync-trigger">
+							</select>
+						</div>
+
+						<div class="form-group col">
+							<label for="options-pos-protocol">Protocole</label>
+							<select id="options-pos-protocol" class="form-control sync-trigger">
+							</select>
+						</div>
+
+					</div>
+
+					<div class="row">
+						<div class="form-group col">
+							<label for="options-pos-port">Port</label>
+							<select id="options-pos-port" class="form-control sync-trigger">
+							</select>
+						</div>
+
+						<div class="form-group col">
+							<label for="options-pos-ethip">Adresse IP</label>
+							<input id="options-pos-ethip" class="form-control sync-trigger" type="text" />
+						</div>
+
+					</div>
+
+					<div class="row">
+
+						<div class="form-group col-5">
+							<button id="options-pos-trigger-ping" type="button" class="btn btn-outline-secondary btn-sm">
+								<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+								Tester la liaison
+							</button>
+						</div>
+
+					</div>
+
+				</fieldset>
+			</div>
+		</form>
+
+		<div id="footer" class="row border-top p-1 pl-2 bg-white">
+			<div class="col">
+				<a href="#" id="trigger-help">A propos</a>
+			</div>
+			<div class="col-6">
+				<div class="form-group form-check">
+					<input id="options-console-activate" value="true" type="checkbox" class="form-check-input sync-trigger">
+					<label for="options-console-activate" class="form-check-label">
+						Activer la console
+					</label> 
+				</div>
+			</div>
+		</div>
+	</div>
+	</body>
+</html>

@@ -1,0 +1,92 @@
+{
+    "staticStyles": {
+        "source": "/assets/styles/**/*.css",
+        "target": "/assets/styles"
+    },
+    "staticHtml": {
+        "source": "/**/*.html",
+        "target": ""
+    },
+    "staticLib": {
+        "source": "/lib/**/*",
+        "target": "/lib"
+    },
+    "locales": {
+        "source": "/_locales/**/*",
+        "target": "/_locales"
+    },
+    "publicFile": {
+        "source": [
+            "/public/**/*",
+            "!/public/**/*.js"
+        ],
+        "target": "/public"
+    },
+    "styles": {
+        "source": [
+            "${__paths.src}/assets/styles/**/*",
+            "!${__paths.src}/assets/styles/**/*.css"
+        ],
+        "target": "${__paths.target}/assets/styles"
+    },
+    "scripts": {
+        "source": [
+            "${__paths.src}/**/*.js",
+            "${__paths.src}/**/*.jsx",
+            "!${__paths.src}/shared/**",
+            "!${__paths.src}/background/**",
+            "!${__paths.src}/public/**",
+            "!${__paths.src}/popup/**",
+            "!${__paths.src}/settings/**",
+            "!${__paths.src}/content/**",
+            "!${__paths.src}/assets/**",
+            "!${__paths.src}/_locales/**",
+            "!${__paths.src}/lib/**"
+        ],
+        "target": "${__paths.target}"
+    },
+    "bundles": {
+        "shared": {
+            "source": [
+                "./src/shared/**/*"
+            ],
+            "bundle": "bundles/shared.js",
+            "target": "${__paths.target}"
+        },
+        "background": {
+            "source": [
+                "./src/background/app.js"
+            ],
+            "bundle": "bundles/background.js",
+            "target": "${__paths.target}"
+        },
+        "content": {
+            "source": [
+                "./src/content/page.js"
+            ],
+            "bundle": "bundles/content.js",
+            "target": "${__paths.target}"
+        },
+        "popup": {
+            "source": [
+                "./src/popup/popup.js"
+            ],
+            "bundle": "bundles/popup.js",
+            "target": "${__paths.target}"
+        },
+        "settings": {
+            "source": [
+                "./src/settings/settings.js"
+            ],
+            "bundle": "bundles/settings.js",
+            "target": "${__paths.target}"
+        },
+        "public": {
+            "source": [
+                "./src/public/support.js"
+            ],
+            "bundle": "bundles/public.js",
+            "target": "${__paths.target}"
+        }
+    }
+}

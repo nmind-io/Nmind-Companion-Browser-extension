@@ -1,0 +1,29 @@
+{
+    "browserify": {
+        "debug": "${__context.isDevelopment}",
+        "extensions": [
+            ".js",
+            ".jsx"
+        ],
+        "standalone": "$",
+        "cache": {},
+        "packageCache": {}
+    },
+    "babelify": {
+        "presets": []
+    },
+    "uglifyify": {
+        "global": true
+    },
+    "runner": {
+        "browserConsole": false,
+        "keepProfileChanges": false,
+        "noInput": true,
+        "noReload": false,
+        "preInstall": false,
+        "startUrl": [
+            "https://nmind.io/companion/companion.html",
+            "about:devtools-toolbox?type=extension&id=nmind-companion%40nmind.io"
+        ]
+    }
+}
