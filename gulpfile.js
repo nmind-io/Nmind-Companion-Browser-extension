@@ -1,3 +1,5 @@
+'use strict';
+
 //---------------------------------------------------------------------------
 //#region Libraries
 //
@@ -10,8 +12,11 @@ const $ = {
     path: require('path'),
     fs: require("fs"),
     process: require('process'),
-    glob: require("glob")
+    glob: require("glob"),
+    spawn : require('node:child_process').spawn
   },
+
+  del: require('del').deleteAsync,
 
   utils: {
     log: require('fancy-log'),
@@ -21,11 +26,29 @@ const $ = {
 
   gulp: require("gulp"),
 
-  gs: Object.assign(require('gulp-load-plugins')(), {
-    merge: require('merge-stream'),
-    _if: require("gulp-if"),
-    runner: require('web-ext').default
-  }),
+  gs: {
+      autoprefixer : require('autoprefixer'),
+      babel        : require('gulp-babel'),
+      changed      : require('gulp-changed').default ?? require('gulp-changed'),
+      cleanDest    : require('gulp-clean-dest'),
+      debug        : require('gulp-debug'),
+      eslintNew    : require('gulp-eslint-new'),
+      fileSync     : require('gulp-file-sync'),
+      gulpIf       : require('gulp-if'),
+      less         : require('gulp-less'),
+      mergeStream  : require('merge-stream'),
+      mergeJson    : require('gulp-merge-json'),
+      rename       : require('gulp-rename'),
+      runner       : require('web-ext').default ?? require('web-ext'),
+      postcss      : require('gulp-postcss'),
+      plumber      : require('gulp-plumber'),
+      sass         : require('gulp-sass')(require('sass')),
+      sourcemaps   : require('gulp-sourcemaps'),
+      tap          : require('gulp-tap'),
+      terser       : require('gulp-terser'),
+      zip          : require('gulp-zip').default ?? require('gulp-zip'),
+      _if          : require('gulp-if'),
+  },
 
   build: {
     browserify: require("browserify"),
@@ -41,33 +64,18 @@ const $ = {
 //---------------------------------------------------------------------------
 //#region Configuration & context
 //
-var __context = createContext();
 
-var __paths = {
-  src: './src',
-  config: './config',
-  target: `./build/${__context.target}`,
-  release: `./build/${__context.target}`,
-  dist: `./dist/`
-};
-importPaths();
+function getBuildTarget() {
+  const raw = ($.node.process.env.TARGET ?? 'firefox').toString().trim().toLowerCase();
 
-var __options = {};
-importOptions();
-
-const __watcher = {
-  workers: [],
-  taskCallback: null,
-  runnerCallback: null,
-  runner : null,
-  options: {
-    delay: 250
+  if (!ALLOWED_TARGETS.has(raw)) {
+    throw new Error(
+      `Invalid TARGET "${raw}". Expected one of: chrome, firefox.`
+    );
   }
+
+  return raw;
 }
-
-const __bundlers = [];
-
-const __appEvent = new EventEmitter();
 
 function reviveImport(key, value) {
 
@@ -75,21 +83,21 @@ function reviveImport(key, value) {
     return value;
   }
 
-  var regex = RegExp('\\${(.+)}', 'g');
-  var result = regex.exec(value);
+  const regex = RegExp('\\${(.+)}', 'g');
+  const result = regex.exec(value);
 
-  if (result != null && result.length == 2) {
-    var whole = result[0];
-    var searched = result[1];
-    var parts = searched.split('.');
-    var varia = null;
+  if (result !== null && result.length === 2) {
+    const whole = result[0];
+    const searched = result[1];
+    const parts = searched.split('.');
+    let varia = null;
 
     try {
 
       parts.reduce((count, currentValue) => {
 
         // Search main object
-        if (count == 0) {
+        if (count === 0) {
 
           switch (currentValue) {
 
@@ -111,7 +119,7 @@ function reviveImport(key, value) {
 
         } else { // search for value
 
-          if(varia[currentValue] == undefined){
+          if(varia[currentValue] === undefined){
             throw "Unknown part " + currentValue + " in " + searched;
           } else {
             varia = varia[currentValue];
@@ -132,27 +140,26 @@ function reviveImport(key, value) {
   return value;
 }
 
-function parseSpecs(path){
-  var environment = $.node.process.env.NODE_ENV || "development";
-  var target = $.node.process.env.TARGET || "firefox";
-
-  var whole = JSON.parse($.node.fs.readFileSync(path));
-  var specs = whole[target];
+function parseSpecs(path, target) {
+  const whole = JSON.parse($.node.fs.readFileSync(path));
+  const specs = whole[target];
 
   delete whole.firefox;
   delete whole.chrome;
 
-  return {
-    whole,
-    specs
-  }
+  return { whole, specs };
 }
 
 function createContext() {
-  var environment = $.node.process.env.NODE_ENV || "development";
-  var target = $.node.process.env.TARGET || "firefox";
+  const environment = $.node.process.env.NODE_ENV || 'development';
+  const target = ($.node.process.env.TARGET ?? 'firefox').toString().trim().toLowerCase();
 
-  var {whole, specs} = parseSpecs(`./config/${environment}.json`);
+  if (!ALLOWED_TARGETS.has(target)) {
+    throw new Error(
+      `Invalid TARGET "${target}". Expected one of: chrome, firefox.`
+    );
+  }
+  const {whole, specs} = parseSpecs(`./config/${environment}.json`);
 
   return merge(
     whole,
@@ -183,6 +190,72 @@ function importOptions() {
   );
 }
 
+function importBundles() {
+
+  const names = Object.keys(__paths.bundles || {}).sort();
+  if (!names.length) {
+    throw new Error('[build] No bundles defined in paths.json.');
+  }
+
+  for (const name of names) {
+    const cfg = __paths.bundles[name];
+
+    if (!cfg.entry || typeof cfg.entry !== 'string') {
+      throw new Error(`[build] Bundle "${name}" is missing "entry" in paths.json or is not a string`);
+    }
+    if (/[?*[\]{}!]/.test(cfg.entry)) {
+      throw new Error(
+        `[build] Bundle "${bundleName}" has an invalid entry (glob pattern detected): ${cfg.entry}\n` +
+        `Fix: set a single file path as "entry" and move patterns to "watch".`
+      );
+    }
+    if (!cfg.watch) {
+      throw new Error(`[build] Bundle "${name}" is missing "watch" in paths.json`);
+    }
+    if (!cfg.bundle || typeof cfg.bundle !== 'string') {
+      throw new Error(`[build] Bundle "${name}" is missing "bundle" in paths.json or is not a string`);
+    }
+    if (!cfg.target || typeof cfg.target !== 'string') {
+      throw new Error(`[build] Bundle "${name}" is missing "target" in paths.json or is not a string`);
+    }
+
+    log(`Bundle found ${name} : ${cfg.bundle}`);
+  }
+
+  __bundles = __paths.bundles;
+
+}
+
+const ALLOWED_TARGETS = new Set(['chrome', 'firefox']);
+const __bundlers = [];
+const __appEvent = new EventEmitter();
+const __watcher = {
+  workers: [],
+  taskCallback: null,
+  runnerCallback: null,
+  runner : null,
+  options: {
+    delay: 250
+  }
+}
+
+const __context = createContext();
+
+let __paths = {
+  src: './src',
+  config: './config',
+  target: `./build/${__context.target}`,
+  release: `./build/${__context.target}`,
+  dist: `./dist/`
+};
+importPaths();
+
+let __options = {};
+importOptions();
+
+let __bundles = {};
+importBundles();
+
 //#endregion ----------------------------------------------------------------
 
 //---------------------------------------------------------------------------
@@ -206,20 +279,44 @@ function deploy(_in, _out) {
   log(`Deploy ${_in} ${_out}`);
   return $.gulp
     .src(_in, { read: true, allowEmpty: true })
-    .pipe($.gs.cleanDest(_out))
-    .pipe($.gs.tap(function (file, t) {
-      var filePath = $.node.path.resolve(process.cwd(), _out, file.relative);
+    .pipe($.gs.tap(function (file) {
       log(`Deploy ${file.relative}`);
     }))
     .pipe($.gulp.dest(_out));
 }
 
 function sync(_in, _out) {
+  // _in et _out sont relatifs à src/target (ex: "/assets/x")
+  const srcRoot = $.node.path.resolve($.node.process.cwd(), `${__paths.src}${_in}`);
+  const outRoot = $.node.path.resolve($.node.process.cwd(), `${__paths.target}${_out}`);
 
+  return function (event, filepath) {
+    // event: 'add' | 'change' | 'unlink' | 'addDir' | 'unlinkDir'
+    const absFile = $.node.path.isAbsolute(filepath)
+      ? filepath
+      : $.node.path.resolve($.node.process.cwd(), filepath);
+
+    const rel = $.node.path.relative(srcRoot, absFile);
+    const targetPath = $.node.path.resolve(outRoot, rel);
+
+    if (event === 'unlink' || event === 'unlinkDir') {
+      return $.del([targetPath], { force: true });
+    }
+
+    if (event === 'add' || event === 'change') {
+      return $.gulp
+        .src(absFile, { base: srcRoot, allowEmpty: true })
+        .pipe($.gulp.dest(outRoot));
+    }
+
+    return Promise.resolve();
+  };
+
+/*
   _in = `${__paths.src}${_in}`
   _out = `${__paths.target}${_out}`;
 
-  var options = {
+  const options = {
     recursive: true,
     addFileCallback: function (fullPathSrc, fullPathDest) {
       log('Synced ' + fullPathDest);
@@ -233,6 +330,7 @@ function sync(_in, _out) {
   }
 
   $.gs.fileSync(_in, _out, options);
+*/
 }
 
 function log(message) {
@@ -240,18 +338,16 @@ function log(message) {
 }
 
 function merge() {
-  var dst = {},
-      src,
-      p,
-      args = [].splice.call(arguments, 0)
-      ;
+
+  const dst = {}, args = [].splice.call(arguments, 0);
+  let src = null;
 
   while (args.length > 0) {
       src = args.splice(0, 1)[0];
-      if (toString.call(src) == '[object Object]') {
-          for (p in src) {
+      if (toString.call(src) === '[object Object]') {
+          for (const p in src) {
               if (src.hasOwnProperty(p)) {
-                  if (toString.call(src[p]) == '[object Object]') {
+                  if (Object.prototype.toString.call(src[p]) === '[object Object]') {
                       dst[p] = merge(dst[p] || {}, src[p]);
                   } else {
                       dst[p] = src[p];
@@ -262,6 +358,33 @@ function merge() {
   }
 
   return dst;
+}
+
+function assertFileExists(filePath, description) {
+  if (!$.node.fs.existsSync(filePath)) {
+    throw new Error(
+      `[build] Missing ${description} file: ${filePath}\n` +
+      `Expected: config/manifest_<target>.json (e.g. config/manifest_chrome.json, config/manifest_firefox.json)\n` +
+      `Current TARGET: ${__context?.target ?? '(unknown)'}\n` +
+      `Fix: create the missing file or set TARGET=chrome|firefox`
+    );
+  }
+}
+
+function sanitizeFilenamePart(input, maxLen = 80) {
+  const s = String(input ?? '')
+    .normalize('NFKD')                 // sépare accents
+    .replace(/[\u0300-\u036f]/g, '')   // supprime accents
+    .trim()
+    .toLowerCase()
+    .replace(/['"]/g, '')             // retire quotes
+    .replace(/[^a-z0-9._-]+/g, '-')    // tout le reste -> -
+    .replace(/-+/g, '-')              // compresse
+    .replace(/^[-.]+|[-.]+$/g, '');   // pas de - ou . en bord
+
+  // éviter les noms vides + limiter la longueur
+  const safe = s.length ? s : 'extension';
+  return safe.slice(0, maxLen);
 }
 
 //#endregion ----------------------------------------------------------------
@@ -309,12 +432,17 @@ $.node.process.on('SIGINT', function () {
 //#region Build and deploy
 //
 function doClean(path) {
-  path = path || __paths.target;
-  return $.gulp.src(path, { read: false, allowEmpty: true }).pipe($.gs.clean());
+    const targetPath = path || __paths.target;
+    console.log($.del)
+    return $.del([targetPath], { force: true });
 }
 
 function doDeployManifest() {
-  var manifest = JSON.parse($.node.fs.readFileSync(`${__paths.config}/manifest_${__context.target}.json`));
+
+  const targetManifestPath = `${__paths.config}/manifest_${__context.target}.json`;
+  assertFileExists(targetManifestPath, `target manifest (${__context.target})`);
+
+  const manifest = JSON.parse($.node.fs.readFileSync(targetManifestPath, 'utf8'));
 
   return $.gulp.src(`${__paths.src}/manifest.json`)
     .pipe($.gs.mergeJson({
@@ -355,39 +483,43 @@ function handleBuildStreamError(error) {
 }
 
 function doBuildStyles() {
-  var _out = __paths.styles.target;
-  var _sources = __paths.styles.source;
+  const _out = __paths.styles.target;
+  const _sources = __paths.styles.source;
 
-  return $.gulp.src(_sources, { sourcemaps: true })
+  return $.gulp.src(_sources, { sourcemaps: __context.isDevelopment })
     .pipe($.gs.plumber())
     .pipe($.gs.changed(_out, { extension: '.css' }))
-    .pipe($.gs.tap(function (file, t) {
-      var filePath = $.node.path.resolve(process.cwd(), _out, file.relative);
+    .pipe($.gs.tap(function (file) {
       log(`Style ${file.relative}`);
     }))
+
+    // SCSS
     .pipe($.gs._if('*.scss', $.gs.sass.sync({
       outputStyle: 'expanded',
       precision: 10,
       includePaths: ['.']
     })))
     .on("error", handleBuildStreamError)
+
+    // LESS
     .pipe($.gs._if('*.less', $.gs.less({
 
     })))
     .on("error", handleBuildStreamError)
+
+    .pipe($.gs._if(__context.isProduction && !__context.watchMod, $.gs.postcss([$.gs.autoprefixer()])))
     .pipe($.gs._if(__context.isDevelopment, $.gs.sourcemaps.write('.')))
     .pipe($.gulp.dest(_out));
 }
 
 function doBuildScripts() {
-  var _out = __paths.scripts.target;
-  var _sources = __paths.scripts.source;
+  const _out = __paths.scripts.target;
+  const _sources = __paths.scripts.source;
 
-  return $.gulp.src(_sources, { sourcemaps: true })
+  return $.gulp.src(_sources, { sourcemaps: __context.isDevelopment })
     .pipe($.gs.plumber())
     .pipe($.gs.changed(_out))
-    .pipe($.gs.tap(function (file, t) {
-      var filePath = $.node.path.resolve(process.cwd(), _out, file.relative);
+    .pipe($.gs.tap(function (file) {
       log(`Script ${file.relative}`);
     }))
 
@@ -403,36 +535,26 @@ function doBuildScripts() {
     .on("error", handleBuildStreamError)
 
     // Minify
-    .pipe($.gs._if(__context.isProduction, $.gs.uglify({
-      "mangle": true,
-      "output": {
-        "ascii_only": true
-      }
-    })))
+    .pipe($.gs.rename((p) => {
+      if (p.extname === '.jsx' || p.extname === '.ts' || p.extname === '.tsx'){ p.extname = '.js'; }
+    }))
+    .pipe($.gs._if(__context.isProduction && !__context.watchMode, $.gs.terser(__options.terser)))
     .pipe($.gs._if(__context.isDevelopment, $.gs.sourcemaps.write('.')))
     .pipe($.gulp.dest(_out));
 }
 
 function doBuildBundle(bundleName) {
 
-  var files = [];
-  var sources = __paths.bundles[bundleName].source;
-  if (!(sources instanceof Array)) {
-    sources = [sources];
+  const bundleConfig = __bundles[bundleName];
+
+  if (!bundleConfig) {
+    throw new Error(`[build] Unknown bundle "${bundleName}"`);
   }
 
-  sources.map(source => {
-    files = files.concat($.node.glob.sync(source, { nodir: true }));
-  });
-
-  var bundler = $.build.browserify(files, __options.browserify);
+  const bundler = $.build.browserify(bundleConfig.entry, __options.browserify);
   __bundlers.push(bundler);
 
   bundler.transform("babelify", __options.babelify);
-
-  if (__context.isProduction) {
-    bundler.transform("uglifyify", __options.uglifyify);
-  }
 
   bundler
     .on('dep', (dep) => {
@@ -447,14 +569,22 @@ function doBuildBundle(bundleName) {
       .on("error", (error) => {
         log(`Bundle '${bundleName}' error > ` + error);
       })
-      .pipe($.build.source(__paths.bundles[bundleName].bundle))
+      .pipe($.build.source(__bundles[bundleName].bundle))
       .pipe($.build.buffer())
-      .pipe($.gulp.dest(__paths.bundles[bundleName].target));
+      .pipe($.gs._if(__context.isProduction && !__context.watchMode, $.gs.terser(__options.terser)))
+      .pipe($.gulp.dest(__bundles[bundleName].target));
   }
 
   if (__context.watchMode) {
     bundler.plugin($.build.watchify);
-    bundler.on("update", build);
+
+    if (bundleConfig.watch) {
+      const watchGlobs = Array.isArray(bundleConfig.watch) ? bundleConfig.watch : [bundleConfig.watch];
+      const watcher = $.gulp.watch(watchGlobs, __watcher.options, build).on('all', watchEventLog);
+      __watcher.workers.push(watcher);
+    }
+
+    bundler.on('update', build);
   }
 
   return build();
@@ -484,33 +614,61 @@ function doWatchKeypress(){
 
 function doWatchManifest() {
   // Prevent deletion
-  var options = Object.assign({}, __watcher.options, { events: ['change'] });
-  var _sources = [
+  const options = Object.assign({}, __watcher.options, { events: ['change'] });
+  const _sources = [
     `${__paths.src}/manifest.json`,
     `${__paths.config}/manifest_${__context.target}.json`
   ];
 
-  watcher = $.gulp.watch(_sources, options, doDeployManifest)
+  const watcher = $.gulp.watch(_sources, options, doDeployManifest)
     .on("all", watchEventLog);
 
   __watcher.workers.push(watcher);
 }
 
+//@todo revoir le fonctionement du runner pour avoir les options en config
+// et terminer proprement la tâche
 function doWatchWebext(resolver) {
 
   if (!__context.runner.enable) {
     log("Extension Runner is disable");
-    resolver();
+    return Promise.resolve(); //resolver();
     return;
   }
 
+  const sourceDir = $.node.path.resolve(__paths.target)
+    const args = [
+    'web-ext',
+    'run',
+    '--source-dir',
+    sourceDir,
+    '--verbose',
+  ];
+
+  const child = $.node.spawn('npx', args, {
+    stdio: 'inherit',
+    shell: true, // important sur Windows pour résoudre npx correctement
+  });
+
+  child.on('close', (code) => {
+    log(`web-ext exited with code ${code}`);
+    __watcher.runnerProcess = null;
+  });
+
+  __watcher.runnerProcess = child;
+  
+  resolver();
+
+/*
   __watcher.runnerCallback = resolver;
 
-  var sourceDir = $.node.path.resolve(__paths.target)
-  var params = Object.assign(
+  const params = Object.assign(
+    {},
     __options.runner,
     {
-      sourceDir: sourceDir
+      sourceDir: sourceDir,
+      verbose: true,
+      devtools: true
     }
   );
 
@@ -529,7 +687,7 @@ function doWatchWebext(resolver) {
       });
 
       __appEvent.on('cli.keypress', (key) => {
-        if(key.ctrl === false && key.name == 'r'){
+        if(key.ctrl === false && key.name === 'r'){
           log('Signal received : R, reloading all extensions ...');
           __watcher.runner.reloadAllExtensions();
         }
@@ -539,11 +697,11 @@ function doWatchWebext(resolver) {
       log("Press R to reload (and Ctrl-C to quit)");
 
     }).catch(error => {
-      log(error.message);
+      log(error.stack || error);
       __watcher.runnerCallback = null;
       resolver();
     });
-
+*/
 }
 
 function doWatchAssets(_asset) {
@@ -572,7 +730,8 @@ function doWatchStaticLib() {
 
 function doWatchStyles() {
 
-  var watcher = $.gulp.watch(__paths.styles.source, __watcher.options)
+  const options = Object.assign({}, __watcher.options, { events: ['add', 'change', 'unlink'] });
+  const watcher = $.gulp.watch(__paths.styles.source, options)
     .on("all", function (event, path) {
       watchEventLog(event, path);
 
@@ -596,7 +755,7 @@ function doWatchStyles() {
 
 function doWatchScripts() {
 
-  var watcher = $.gulp.watch(__paths.scripts.source, __watcher.options)
+  const watcher = $.gulp.watch(__paths.scripts.source, __watcher.options)
     .on("all", function (event, path) {
       watchEventLog(event, path);
 
@@ -610,15 +769,13 @@ function doWatchScripts() {
           path = resolveInTarget(path);
           doClean($.utils.replaceExt(path, '.js'));
           doClean($.utils.replaceExt(path, '.js.map'));
+          doClean($.utils.replaceExt(path, '.jsx'));
+          doClean($.utils.replaceExt(path, '.jsx.map'));
           break;
       }
     });
 
   __watcher.workers.push(watcher);
-}
-
-function doWatchBundle(name) {
-  doBuildBundle(name, true);
 }
 
 function doWatchDeploy(_in, _out, _handler) {
@@ -628,21 +785,23 @@ function doWatchDeploy(_in, _out, _handler) {
       watchEventLog(event, path);
 
       switch (event) {
-        case "add":
-        case "change":
-        case "addDir":
-        case "unlinkDir":
-          deploy(_in, _out);
-          break;
+        case 'add':
+        case 'change':
+        case 'addDir':
+          // recopier
+          return deploy(_in, _out);
+
         case 'unlink':
-          doClean(resolveInTarget(path));
-          break;
+        case 'unlinkDir':
+          // supprimer côté build
+          return doClean(resolveInTarget(path));
       }
 
     };
   }
 
-  var watcher = $.gulp.watch(`${__paths.src}${_in}`, __watcher.options)
+  const options = Object.assign({}, __watcher.options, { events: ['add', 'change', 'unlink', 'unlinkDir'] });
+  const watcher = $.gulp.watch(`${__paths.src}${_in}`, options)
     .on("all", _handler)
     .on('error', error => {
       // https://github.com/paulmillr/chokidar/issues/566#issuecomment-468574563
@@ -657,21 +816,13 @@ function doWatchDeploy(_in, _out, _handler) {
 
 function doWatchSync(_source, _in, _out) {
   _out = _out || _in;
+  const handler = sync(_in, _out);
 
-  var watcher = $.gulp.watch(`${__paths.src}${_source}`, __watcher.options)
+  const options = Object.assign({}, __watcher.options, { events: ['add', 'change', 'unlink', 'unlinkDir'] });
+  const watcher = $.gulp.watch(`${__paths.src}${_source}`, options)
     .on("all", function (event, path) {
       watchEventLog(event, path);
-
-      switch (event) {
-        case "add":
-        case "change":
-        case "unlink":
-        case "addDir":
-        case "unlinkDir":
-          sync(_in, _out);
-          break;
-      }
-
+      return handler(event, path);
     }).on('error', error => {
       // https://github.com/paulmillr/chokidar/issues/566#issuecomment-468574563
       // Ignore EPERM errors in windows, which happen if you delete watched folders...
@@ -712,7 +863,7 @@ function _Tmanifest() {
 }
 
 function _Tassets() {
-  return $.gs.merge(
+  return $.gs.mergeStream(
     doDeployAssets('icons'),
     doDeployAssets('images'),
     doDeployAssets('public'),
@@ -740,15 +891,9 @@ function _Tscripts() {
   return doBuildScripts();
 }
 
-//@TODO List bundles from config
 function _Tbundles() {
-  return $.gs.merge(
-    doBuildBundle("background"),
-    doBuildBundle("content"),
-    doBuildBundle("public"),
-    doBuildBundle("popup"),
-    doBuildBundle("settings")
-  );
+  const names = Object.keys(__bundles);
+  return $.gs.mergeStream(...names.map(doBuildBundle));
 }
 
 function _TstaticLib() {
@@ -797,12 +942,28 @@ function _TprepareWatch(resolve) {
 //#region Task : Package
 //
 function _Tpackage() {
-  var manifest = JSON.parse($.node.fs.readFileSync(`${__paths.target}/manifest.json`));
-  var extension = __context.isFirefox ? "xpi" : "zip";
-  var filename = `package-${manifest.name}-${manifest.version}.${extension}`
-  return $.gulp.src(`${__paths.target}/**/*`, { read: true, allowEmpty: true })
+  const manifest = JSON.parse($.node.fs.readFileSync(`${__paths.target}/manifest.json`, 'utf8'));
+  const extension = __context.isFirefox ? "xpi" : "zip";
+  const safeName = sanitizeFilenamePart(manifest.name);
+  const safeVersion = sanitizeFilenamePart(manifest.version, 32);
+  const filename = `package-${safeName}-${safeVersion}.${extension}`
+
+  const target = [
+    `${__paths.target}/**/*`,
+
+    `!${__paths.target}/**/.DS_Store`,
+    `!${__paths.target}/**/Thumbs.db`,
+    `!${__paths.target}/**/*.log`,
+    `!${__paths.target}/**/*.tmp`,
+    `!${__paths.target}/**/.cache/**`,
+    `!${__paths.target}/**/.eslintcache`,
+
+    ...(__context.isProduction ? [`!${__paths.target}/**/*.map`] : []),
+  ];
+
+  return $.gulp.src(target, { read: true, allowEmpty: true })
     .pipe($.gs.zip(filename))
-    .pipe($.gulp.dest(__paths.dist));
+    .pipe($.gulp.dest(`${__paths.dist}/${__context.target}`));
 }
 
 //#endregion ----------------------------------------------------------------

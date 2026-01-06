@@ -3,17 +3,34 @@
         "debug": "${__context.isDevelopment}",
         "extensions": [
             ".js",
-            ".jsx"
+            ".jsx",
+            ".ts",
+            ".tsx"
         ],
         "standalone": "$",
         "cache": {},
         "packageCache": {}
     },
     "babelify": {
-        "presets": []
+        "extensions": [
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx"
+        ],
+        "presets": [
+            ["@babel/preset-env", { "modules": "commonjs" }],
+            ["@babel/preset-react", {}],
+            ["@babel/preset-typescript", { "isTSX": true, "allExtensions": true }]
+        ]
     },
-    "uglifyify": {
-        "global": true
+    "terser": {
+        "ecma": 2017,
+        "compress": true,
+        "mangle": true,
+        "format": {
+            "ascii_only" : true
+        }
     },
     "runner": {
         "browserConsole": false,
@@ -22,7 +39,7 @@
         "noReload": false,
         "preInstall": false,
         "startUrl": [
-            "https://nmind.io/companion/companion.html",
+            "https://nmind.io/companion.html",
             "about:devtools-toolbox?type=extension&id=nmind-companion%40nmind.io"
         ]
     }

@@ -24,7 +24,9 @@
     },
     "styles": {
         "source": [
-            "${__paths.src}/assets/styles/**/*",
+            "${__paths.src}/assets/styles/**/*.scss",
+            "${__paths.src}/assets/styles/**/*.sass",
+            "${__paths.src}/assets/styles/**/*.less",
             "!${__paths.src}/assets/styles/**/*.css"
         ],
         "target": "${__paths.target}/assets/styles"
@@ -47,43 +49,49 @@
     },
     "bundles": {
         "shared": {
-            "source": [
-                "./src/shared/**/*"
+            "entry": "./src/shared/index.js",
+            "watch": [
+                "./src/shared/**/*.{js,jsx}"
             ],
             "bundle": "bundles/shared.js",
             "target": "${__paths.target}"
         },
         "background": {
-            "source": [
-                "./src/background/app.js"
+            "entry": "./src/background/app.js",
+            "watch": [
+                "./src/background/**/*.{js,jsx}"
             ],
             "bundle": "bundles/background.js",
             "target": "${__paths.target}"
         },
         "content": {
-            "source": [
-                "./src/content/page.js"
+            "entry": "./src/content/page.js",
+            "watch": [
+                "./src/content/**/*.{js,jsx}"
             ],
             "bundle": "bundles/content.js",
             "target": "${__paths.target}"
         },
         "popup": {
-            "source": [
-                "./src/popup/popup.js"
+            "entry": "./src/popup/popup.js",
+            "watch": [
+                "./src/popup/**/*.{js,jsx}"
             ],
             "bundle": "bundles/popup.js",
             "target": "${__paths.target}"
         },
         "settings": {
-            "source": [
-                "./src/settings/settings.js"
+            "entry": "./src/settings/settings.js",
+            "watch": [
+                "./src/settings/**/*.{js,jsx}"
             ],
             "bundle": "bundles/settings.js",
             "target": "${__paths.target}"
         },
         "public": {
-            "source": [
-                "./src/public/support.js"
+            "entry": "./src/public/support.js",
+            "watch": [
+                "./src/public/**/*.{js,jsx}"
             ],
             "bundle": "bundles/public.js",
             "target": "${__paths.target}"
