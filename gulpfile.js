@@ -298,13 +298,35 @@ function importBundles() {
 
 }
 
+/**
+ * -----------------------------------------------------------------------------
+ * GLOBAL RUNTIME STATE (module-level)
+ * -----------------------------------------------------------------------------
+ * This gulpfile runs as a Node.js module: everything at the top-level executes
+ * once when Gulp loads the file.
+ *
+ * We keep a small amount of global state to coordinate:
+ * - Build context (`__context`): target (chrome|firefox), env (dev|prod), watchMode…
+ * - Resolved paths/options (`__paths`, `__options`): loaded from config/*.json with ${...} interpolation
+ * - Bundle registry (`__bundles`): derived from paths.json and validated at startup
+ * - Watch/runtime handles (`__watcher`, `__bundlers`): used to close watchers and child processes cleanly
+ *
+ * Onboarding note:
+ * - If something “happens too early”, it is often because it runs at module load time.
+ * - Prefer explicit task sequencing (gulp.series / promises) for anything asynchronous.
+ * -----------------------------------------------------------------------------
+ */
 const ALLOWED_TARGETS = new Set(['chrome', 'firefox']);
 const __bundlers = [];
 const __appEvent = new EventEmitter();
 const __watcher = {
+  // Chokidar/Gulp watchers created during `watch` (closed on exit)
   workers: [],
+  // Gulp task completion callback for the watch task (used to unblock gulp.series on exit)
   taskCallback: null,
+  // Child process (spawn) for `web-ext run` (or legacy runner) when watch mode starts a browser
   runner : null,
+  // Shared chokidar options for all watchers (debounce events)
   options: {
     delay: 250
   }
@@ -542,9 +564,9 @@ function sanitizeFilenamePart(input, maxLen = 80) {
  * Converts a gulp/vinyl stream into a Promise that resolves when writing has completed.
  *
  * Why this exists:
- * Browserify pipelines can appear to 'finish' early when composed with `merge-stream`.
- * By awaiting `finish/end`, `_Tbundles()` ensures gulp does not complete the build before all bundles
- * have been fully written to disk.
+ * Browserify bundles go through several adapters (vinyl-source-stream -> vinyl-buffer -> dest).
+ * In practice, gulp can consider a task 'done' too early when you merge multiple bundle streams.
+ * By awaiting `finish`/`end` we guarantee that files are fully written before the task completes.
  *
  * @param {any} stream Parameter (see description above / inline comments).
  * @param {any} name Parameter (see description above / inline comments).
