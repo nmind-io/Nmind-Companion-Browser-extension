@@ -35,7 +35,6 @@ const $ = {
       eslintNew    : require('gulp-eslint-new'),
       fileSync     : require('gulp-file-sync'),
       less         : require('gulp-less'),
-      mergeStream  : require('merge-stream'),
       mergeJson    : require('gulp-merge-json'),
       rename       : require('gulp-rename'),
       runner       : require('web-ext').default ?? require('web-ext'),
