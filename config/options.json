@@ -7,9 +7,15 @@
             ".ts",
             ".tsx"
         ],
-        "standalone": "$",
         "cache": {},
         "packageCache": {}
+    },
+    "babel": {
+        "presets": [
+            ["@babel/preset-env", { "modules": false }],
+            ["@babel/preset-react", {}],
+            ["@babel/preset-typescript", { "isTSX": true, "allExtensions": true }]
+        ]
     },
     "babelify": {
         "extensions": [
@@ -33,14 +39,9 @@
         }
     },
     "runner": {
-        "browserConsole": false,
-        "keepProfileChanges": false,
-        "noInput": true,
-        "noReload": false,
-        "preInstall": false,
         "startUrl": [
-            "https://nmind.io/companion.html",
-            "about:devtools-toolbox?type=extension&id=nmind-companion%40nmind.io"
+            "https://nmind.io/companion/companion.html",
+            "about:devtools-toolbox?type=extension&id=nmind-companion@nmind.io"
         ]
     }
 }

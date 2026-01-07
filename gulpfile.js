@@ -34,7 +34,6 @@ const $ = {
       debug        : require('gulp-debug'),
       eslintNew    : require('gulp-eslint-new'),
       fileSync     : require('gulp-file-sync'),
-      gulpIf       : require('gulp-if'),
       less         : require('gulp-less'),
       mergeStream  : require('merge-stream'),
       mergeJson    : require('gulp-merge-json'),
@@ -64,18 +63,6 @@ const $ = {
 //---------------------------------------------------------------------------
 //#region Configuration & context
 //
-
-function getBuildTarget() {
-  const raw = ($.node.process.env.TARGET ?? 'firefox').toString().trim().toLowerCase();
-
-  if (!ALLOWED_TARGETS.has(raw)) {
-    throw new Error(
-      `Invalid TARGET "${raw}". Expected one of: chrome, firefox.`
-    );
-  }
-
-  return raw;
-}
 
 function reviveImport(key, value) {
 
@@ -159,7 +146,7 @@ function createContext() {
       `Invalid TARGET "${target}". Expected one of: chrome, firefox.`
     );
   }
-  const {whole, specs} = parseSpecs(`./config/${environment}.json`);
+  const {whole, specs} = parseSpecs(`./config/${environment}.json`, target);
 
   return merge(
     whole,
@@ -205,7 +192,7 @@ function importBundles() {
     }
     if (/[?*[\]{}!]/.test(cfg.entry)) {
       throw new Error(
-        `[build] Bundle "${bundleName}" has an invalid entry (glob pattern detected): ${cfg.entry}\n` +
+        `[build] Bundle "${name}" has an invalid entry (glob pattern detected): ${cfg.entry}\n` +
         `Fix: set a single file path as "entry" and move patterns to "watch".`
       );
     }
@@ -232,7 +219,6 @@ const __appEvent = new EventEmitter();
 const __watcher = {
   workers: [],
   taskCallback: null,
-  runnerCallback: null,
   runner : null,
   options: {
     delay: 250
@@ -387,6 +373,18 @@ function sanitizeFilenamePart(input, maxLen = 80) {
   return safe.slice(0, maxLen);
 }
 
+function streamToPromise(stream, name) {
+  return new Promise((resolve, reject) => {
+    if (!stream || typeof stream.on !== 'function') {
+      reject(new Error(`[build] ${name} did not return a stream`));
+      return;
+    }
+    stream.on('finish', resolve);
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+}
+
 //#endregion ----------------------------------------------------------------
 
 //---------------------------------------------------------------------------
@@ -394,31 +392,35 @@ function sanitizeFilenamePart(input, maxLen = 80) {
 //
 
 $.utils.readline.emitKeypressEvents($.node.process.stdin);
-$.node.process.stdin.setRawMode(true);
+if ($.node.process.stdin.isTTY) {
+  $.node.process.stdin.setRawMode(true);
+}
 
 __appEvent.on('app.requestExit', (from) => {
 
     log(`Exit request from ${from}`);
+
+    if(__watcher.runner){
+
+      log(`kill ${__watcher.runner.pid} ${$.node.process.platform}`);
+
+      if ($.node.process.platform === 'win32') {
+        $.node.spawn('taskkill', ['/pid', String(__watcher.runner.pid), '/T', '/F'], {
+          stdio: 'ignore'
+        });
+      } else {
+        __watcher.runner.kill('SIGTERM');
+      }
+    }
+
     watchersCloseAll();
 
     if (__watcher.taskCallback) {
       __watcher.taskCallback();
     }
-  
-    if (__watcher.runnerCallback) {
-      __watcher.runnerCallback();
-    }
-  
-    if(__watcher.runner){
-      __watcher.runner.exit().then(() => {
-        log('Now runner is closed');
-        $.node.process.exit();
-      });
-    } else {
-      log('Bye bye');
-      $.node.process.exit();
-    }
 
+    log('Bye bye');
+    $.node.process.exit();
 });
 
 $.node.process.on('SIGINT', function () {
@@ -433,7 +435,6 @@ $.node.process.on('SIGINT', function () {
 //
 function doClean(path) {
     const targetPath = path || __paths.target;
-    console.log($.del)
     return $.del([targetPath], { force: true });
 }
 
@@ -478,8 +479,7 @@ function doDeployStaticLib() {
 }
 
 function handleBuildStreamError(error) {
-  log("Build error : " + error)
-  this.emit("end");
+  log(`Build error: ${error && (error.stack || error.message || error)}`);
 }
 
 function doBuildStyles() {
@@ -507,7 +507,7 @@ function doBuildStyles() {
     })))
     .on("error", handleBuildStreamError)
 
-    .pipe($.gs._if(__context.isProduction && !__context.watchMod, $.gs.postcss([$.gs.autoprefixer()])))
+    .pipe($.gs._if(__context.isProduction && !__context.watchMode, $.gs.postcss([$.gs.autoprefixer()])))
     .pipe($.gs._if(__context.isDevelopment, $.gs.sourcemaps.write('.')))
     .pipe($.gulp.dest(_out));
 }
@@ -517,22 +517,17 @@ function doBuildScripts() {
   const _sources = __paths.scripts.source;
 
   return $.gulp.src(_sources, { sourcemaps: __context.isDevelopment })
-    .pipe($.gs.plumber())
-    .pipe($.gs.changed(_out))
+    .pipe($.gs.plumber({
+      errorHandler: function (err) {
+        handleBuildStreamError(err);
+        this.emit('end');
+      }
+    }))
+    .pipe($.gs.changed(_out, { extension: '.js' }))
     .pipe($.gs.tap(function (file) {
       log(`Script ${file.relative}`);
     }))
-
-    // Javascript
-    .pipe($.gs._if('*.js', $.gs.babel()))
-    .on("error", handleBuildStreamError)
-
-    // React
-    .pipe($.gs._if('*.jsx', $.gs.babel({
-      presets: ['@babel/react'],
-      compact: false
-    })))
-    .on("error", handleBuildStreamError)
+    .pipe($.gs.babel(__options.babel))
 
     // Minify
     .pipe($.gs.rename((p) => {
@@ -551,7 +546,11 @@ function doBuildBundle(bundleName) {
     throw new Error(`[build] Unknown bundle "${bundleName}"`);
   }
 
-  const bundler = $.build.browserify(bundleConfig.entry, __options.browserify);
+  const bundler = $.build.browserify(bundleConfig.entry, Object.assign({}, __options.browserify, {
+    cache: {},
+    packageCache: {},
+  }));
+
   __bundlers.push(bundler);
 
   bundler.transform("babelify", __options.babelify);
@@ -565,14 +564,19 @@ function doBuildBundle(bundleName) {
     });
 
   function build() {
+    const bundleOutFile = $.node.path.basename(bundleConfig.bundle);
+    const bundleOutDir  = $.node.path.dirname(bundleConfig.bundle);
+
     return bundler.bundle()
-      .on("error", (error) => {
-        log(`Bundle '${bundleName}' error > ` + error);
+      .on("error", function (error) {
+        log(`Bundle '${bundleName}' error:\n${error && (error.stack || error.message || error)}`);
+        this.emit('end');
       })
-      .pipe($.build.source(__bundles[bundleName].bundle))
+      .pipe($.build.source(bundleOutFile))
       .pipe($.build.buffer())
       .pipe($.gs._if(__context.isProduction && !__context.watchMode, $.gs.terser(__options.terser)))
-      .pipe($.gulp.dest(__bundles[bundleName].target));
+      .pipe($.gulp.dest($.node.path.join(bundleConfig.target, bundleOutDir)))
+      .on('finish', () => log(`Bundle '${bundleName}' finished writing`));
   }
 
   if (__context.watchMode) {
@@ -602,7 +606,7 @@ function doWatchKeypress(){
   $.node.process.stdin.on('keypress', (str, key) => {
 
     if (key.ctrl && key.name === 'c') {
-      log('Signal received : CTRL+C, now exit ...');
+      log('Signal received : CTRL+C, now exiting ...');
       __appEvent.emit('app.requestExit', 'Signal watcher : CTRL+C');
     } else {
       __appEvent.emit('cli.keypress', key);
@@ -626,82 +630,52 @@ function doWatchManifest() {
   __watcher.workers.push(watcher);
 }
 
-//@todo revoir le fonctionement du runner pour avoir les options en config
-// et terminer proprement la tâche
 function doWatchWebext(resolver) {
 
   if (!__context.runner.enable) {
-    log("Extension Runner is disable");
-    return Promise.resolve(); //resolver();
+    log(`Extension Runner is disable for ${__context.target}`);
+    resolver();
+    __appEvent.emit('app.requestExit', 'No signal : Webext is disable');
     return;
   }
 
-  const sourceDir = $.node.path.resolve(__paths.target)
-    const args = [
+  const args = [
     'web-ext',
     'run',
-    '--source-dir',
-    sourceDir,
-    '--verbose',
+    '--target', __context.target === 'firefox' ? 'firefox-desktop' : 'chromium',
+    '--verbose', // Show verbose output
+    '--no-input', // Disable all features that require standard input 
+    '--reload', // Reload the extension when source files change
+    '--source-dir', $.node.path.resolve(__paths.target)
   ];
 
-  const child = $.node.spawn('npx', args, {
-    stdio: 'inherit',
-    shell: true, // important sur Windows pour résoudre npx correctement
+  if (Array.isArray(__options.runner.startUrl)) {
+    __options.runner.startUrl.forEach((url) => {
+      if (typeof url === 'string' && url.trim()) {
+        args.push('--start-url', url);
+      }
+    });
+  }
+
+  const spawned = $.node.spawn('npx', args, {
+    stdio: 'pipe',
+    shell: false
   });
 
-  child.on('close', (code) => {
-    log(`web-ext exited with code ${code}`);
-    __watcher.runnerProcess = null;
+  if(spawned.stdout){
+    spawned.stdout.on('data', (data) => {
+      log(`Spawned web-ext : ${data}`);
+    });
+  }
+
+  spawned.on('close', (code) => {
+    log(`Spawned web-ext exited with code ${code}`);
+    __watcher.runner = null;
   });
 
-  __watcher.runnerProcess = child;
+  __watcher.runner = spawned;
   
   resolver();
-
-/*
-  __watcher.runnerCallback = resolver;
-
-  const params = Object.assign(
-    {},
-    __options.runner,
-    {
-      sourceDir: sourceDir,
-      verbose: true,
-      devtools: true
-    }
-  );
-
-  $.gs.runner.cmd.run(params,
-    {
-      // These are non CLI related options for each function.
-      // You need to specify this one so that your NodeJS application
-      // can continue running after web-ext is finished.
-      shouldExitProgram: false,
-
-    }).then((extensionRunner) => {
-      __watcher.runner = extensionRunner;
-      __watcher.runner.registerCleanup(() => {
-        log("Runner will close, now cleanup and exit ...");
-        __appEvent.emit('app.requestExit', 'Extension runner');
-      });
-
-      __appEvent.on('cli.keypress', (key) => {
-        if(key.ctrl === false && key.name === 'r'){
-          log('Signal received : R, reloading all extensions ...');
-          __watcher.runner.reloadAllExtensions();
-        }
-      });
-
-      log("The extension will reload if any source file changes");
-      log("Press R to reload (and Ctrl-C to quit)");
-
-    }).catch(error => {
-      log(error.stack || error);
-      __watcher.runnerCallback = null;
-      resolver();
-    });
-*/
 }
 
 function doWatchAssets(_asset) {
@@ -839,12 +813,9 @@ function watchEventLog(event, path) {
   log(`Watch ${event} '${path}'`);
 }
 
-function watchersCloseAll() {
-  __watcher.workers.forEach(async watcher => {
-    await watcher.close();
-  });
+async function watchersCloseAll() {
+  await Promise.all(__watcher.workers.map(w => w.close()));
 }
-
 //#endregion ----------------------------------------------------------------
 
 //---------------------------------------------------------------------------
@@ -862,13 +833,12 @@ function _Tmanifest() {
   return doDeployManifest();
 }
 
-function _Tassets() {
-  return $.gs.mergeStream(
-    doDeployAssets('icons'),
-    doDeployAssets('images'),
-    doDeployAssets('public'),
-    doDeployStaticStyles()
-  );
+async function _Tassets() {
+
+  const names = ['icons', 'images', 'public'];
+  const streams = names.map((n) => doDeployAssets(n));
+
+  await Promise.all(streams.map((s, i) => streamToPromise(s, `bundle:${names[i]}`)));
 }
 
 function _Tlocales() {
@@ -887,13 +857,19 @@ function _Tstyles() {
   return doBuildStyles();
 }
 
+function _TstaticStyles() {
+  return doDeployStaticStyles();
+}
+
 function _Tscripts() {
   return doBuildScripts();
 }
 
-function _Tbundles() {
+async function _Tbundles() {
   const names = Object.keys(__bundles);
-  return $.gs.mergeStream(...names.map(doBuildBundle));
+  const streams = names.map((n) => doBuildBundle(n));
+
+  await Promise.all(streams.map((s, i) => streamToPromise(s, `bundle:${names[i]}`)));
 }
 
 function _TstaticLib() {
@@ -978,11 +954,12 @@ function _Sbuild() {
     $.gulp.parallel(
       _Tmanifest,
       _Tstyles,
+      _TstaticStyles,
       _Tassets,
       _Tlocales,
       _Tpublic,
       _Thtml,
-      _TstaticLib
+      _TstaticLib,
     ),
     _Tscripts,
     _Tbundles

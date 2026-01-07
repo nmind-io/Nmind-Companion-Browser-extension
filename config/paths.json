@@ -35,6 +35,8 @@
         "source": [
             "${__paths.src}/**/*.js",
             "${__paths.src}/**/*.jsx",
+            "${__paths.src}/**/*.ts",
+            "${__paths.src}/**/*.tsx",
             "!${__paths.src}/shared/**",
             "!${__paths.src}/background/**",
             "!${__paths.src}/public/**",
@@ -51,7 +53,7 @@
         "shared": {
             "entry": "./src/shared/index.js",
             "watch": [
-                "./src/shared/**/*.{js,jsx}"
+                "./src/shared/**/*.{js,jsx,ts,tsx}"
             ],
             "bundle": "bundles/shared.js",
             "target": "${__paths.target}"
@@ -59,7 +61,7 @@
         "background": {
             "entry": "./src/background/app.js",
             "watch": [
-                "./src/background/**/*.{js,jsx}"
+                "./src/background/**/*.{js,jsx,ts,tsx}"
             ],
             "bundle": "bundles/background.js",
             "target": "${__paths.target}"
@@ -67,7 +69,7 @@
         "content": {
             "entry": "./src/content/page.js",
             "watch": [
-                "./src/content/**/*.{js,jsx}"
+                "./src/content/**/*.{js,jsx,ts,tsx}"
             ],
             "bundle": "bundles/content.js",
             "target": "${__paths.target}"
@@ -75,7 +77,7 @@
         "popup": {
             "entry": "./src/popup/popup.js",
             "watch": [
-                "./src/popup/**/*.{js,jsx}"
+                "./src/popup/**/*.{js,jsx,ts,tsx}"
             ],
             "bundle": "bundles/popup.js",
             "target": "${__paths.target}"
@@ -83,7 +85,7 @@
         "settings": {
             "entry": "./src/settings/settings.js",
             "watch": [
-                "./src/settings/**/*.{js,jsx}"
+                "./src/settings/**/*.{js,jsx,ts,tsx}"
             ],
             "bundle": "bundles/settings.js",
             "target": "${__paths.target}"
@@ -91,7 +93,7 @@
         "public": {
             "entry": "./src/public/support.js",
             "watch": [
-                "./src/public/**/*.{js,jsx}"
+                "./src/public/**/*.{js,jsx,ts,tsx}"
             ],
             "bundle": "bundles/public.js",
             "target": "${__paths.target}"
