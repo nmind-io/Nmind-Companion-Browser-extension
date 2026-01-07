@@ -8,7 +8,7 @@
 	}, 
 	"chrome" : {
 		"runner": {
-			"enable": false
+			"enable": true
 		}
 	}
 }
