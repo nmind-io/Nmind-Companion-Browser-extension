@@ -1,26 +1,180 @@
 'use strict';
 
 /**
- * Nmind Companion Browser Extension - Gulp build system
+ * =============================================================================
+ * ONBOARDING GUIDE â€“ Nmind Companion Browser Extension
+ * =============================================================================
  *
- * This gulpfile drives the full local developer workflow and release packaging:
- * - Clean: remove build artifacts under `build/<target>`
- * - Build: copy static assets + compile styles/scripts + generate browserify bundles
- * - Watch: incremental rebuilds + optional Firefox runner (web-ext) for rapid feedback
- * - Package: create a `.xpi` (Firefox) or `.zip` (Chrome) release artifact
+ * This repository ships a WebExtension (Chrome + Firefox).
+ * This gulpfile is the single source of truth for the developer workflow
+ * and release packaging.
  *
- * Key concepts
- * - TARGET: browser target, must be `chrome` or `firefox`. Used for output path and manifest overlay.
- * - __context: immutable run context (env, target, flags). Treat as source of truth.
- * - __paths: path map loaded from `config/paths.json` with `${...}` placeholders expanded.
- * - __options: toolchain options loaded from `config/options.json` (browserify/babelify/terser/runner).
- * - __bundles: validated bundle config (`entry`, `watch`, `bundle`, `target`) loaded from paths.json.
- * - __watcher: registry of active file watchers and runner process so shutdown is graceful.
+ * It provides a complete pipeline:
  *
- * Notes on reliability
- * - Bundles are built via Browserify + Babelify. Each bundler gets its own `cache/packageCache`.
- * - `_Tbundles()` awaits bundle stream completion to prevent gulp from finishing early.
- * - Windows runner shutdown may require killing a process tree (taskkill), especially when using `npx`.
+ *   clean
+ *     -> prepare
+ *       -> build (scripts / styles / assets / locales / html / staticLib)
+ *         -> bundle (Browserify)
+ *           -> package
+ *             -> run / watch
+ *
+ * -----------------------------------------------------------------------------
+ * 1) Glossary (core globals)
+ * -----------------------------------------------------------------------------
+ *
+ * - __context
+ *     Immutable-ish build context computed once at startup.
+ *     It contains:
+ *       - cwd
+ *       - TARGET (chrome | firefox)
+ *       - environment flags (isDevelopment / isProduction)
+ *       - watchMode
+ *
+ *     Treat __context as the single source of truth for conditional behavior
+ *     (dev vs prod, watch vs release).
+ *
+ * - __paths
+ *     Resolved path map loaded from config/paths.json (with ${...} interpolation).
+ *     It defines:
+ *       - source and target roots
+ *       - logical groups (scripts, styles, assets, locales, html, staticLib)
+ *       - bundle definitions (entry, watch globs, output file, output target)
+ *
+ * - __options
+ *     Toolchain options loaded from config/options.json (also interpolated).
+ *     Holds configuration for:
+ *       - browserify
+ *       - babelify / babel
+ *       - terser
+ *       - web-ext runner
+ *
+ * - __bundles
+ *     Validated bundle registry derived from __paths.bundles.
+ *     Keys are bundle names:
+ *       background / content / popup / settings / public / shared
+ *
+ * - __watcher
+ *     Runtime registry for anything that must be closed explicitly:
+ *       - chokidar file watchers
+ *       - spawned runner process (web-ext run)
+ *       - callbacks used to unblock gulp tasks on exit
+ *
+ * -----------------------------------------------------------------------------
+ * 2) How TARGET works (Chrome vs Firefox)
+ * -----------------------------------------------------------------------------
+ *
+ * The environment variable TARGET selects both:
+ *   - the output build directory
+ *   - the manifest variant
+ *
+ *   TARGET=chrome   -> build/chrome
+ *   TARGET=firefox  -> build/firefox
+ *
+ * TARGET is validated early. Any other value is a hard error to prevent writing
+ * files into unexpected locations or packaging invalid artifacts.
+ *
+ * -----------------------------------------------------------------------------
+ * 3) Build outputs (where things go)
+ * -----------------------------------------------------------------------------
+ *
+ * The output root is:
+ *
+ *   __paths.target  -> build/<target>   (e.g. build/firefox)
+ *
+ * Under that root:
+ *   - bundles/*      Browserify bundles (background/content/...)
+ *   - css/*          Compiled styles (scss / less)
+ *   - assets/*       Copied static assets
+ *   - locales/*      i18n resources
+ *   - manifest.json  Generated from manifest_<target>.json
+ *
+ * -----------------------------------------------------------------------------
+ * 4) Bundle model (entry vs watch globs)
+ * -----------------------------------------------------------------------------
+ *
+ * Each bundle is defined in paths.json:
+ *   - entry
+ *       A SINGLE file (no globs) used by Browserify to build the dependency graph.
+ *
+ *   - watch
+ *       Optional glob(s) used only in watch mode to trigger rebuilds.
+ *
+ *   - bundle
+ *       Output path relative to the target root
+ *       (e.g. "bundles/background.js").
+ *
+ *   - target
+ *       Usually "${__paths.target}".
+ *
+ * IMPORTANT:
+ *   - entry must be unique, explicit, and stable.
+ *   - watch globs may be broad.
+ *
+ * -----------------------------------------------------------------------------
+ * 5) Reliability notes (important design decisions)
+ * -----------------------------------------------------------------------------
+ *
+ * - Browserify / Watchify caches
+ *   Browserify maintains incremental caches. Sharing cache/packageCache objects
+ *   across multiple bundlers leads to cross-talk and non-deterministic builds.
+ *   Each bundle therefore gets its own cache and packageCache instances.
+ *
+ * - Waiting for bundle completion
+ *   Browserify bundles go through several adapters
+ *   (vinyl-source-stream -> vinyl-buffer -> dest).
+ *   When bundling multiple bundles in parallel, gulp may otherwise consider the
+ *   task finished before the last file is fully written.
+ *   `_Tbundles()` explicitly awaits stream finish/end events.
+ *
+ * - Windows runner shutdown
+ *   On Windows, `web-ext run` may spawn Firefox in a detached way.
+ *   Shutting down cleanly often requires killing a full process tree
+ *   using `taskkill /T /F`.
+ *
+ * -----------------------------------------------------------------------------
+ * 6) Watch mode overview
+ * -----------------------------------------------------------------------------
+ *
+ * `gulp watch`:
+ *   - enables __context.watchMode
+ *   - runs an initial full build (ensuring build/<target> is complete)
+ *   - starts file watchers for incremental rebuilds and copies
+ *   - optionally spawns `web-ext run` for live reload testing
+ *
+ * On exit:
+ *   - all file watchers are closed
+ *   - the runner process is stopped
+ *   - on Windows, the Firefox process tree is force-terminated if needed
+ *
+ * -----------------------------------------------------------------------------
+ * 7) Common commands
+ * -----------------------------------------------------------------------------
+ *
+ * - Build only:
+ *     cross-env TARGET=firefox gulp build
+ *     cross-env TARGET=chrome  gulp build
+ *
+ * - Watch + run in Firefox:
+ *     cross-env TARGET=firefox gulp watch
+ *
+ * - Package release artifact:
+ *     cross-env TARGET=firefox gulp package
+ *
+ * -----------------------------------------------------------------------------
+ * 8) Debug tips
+ * -----------------------------------------------------------------------------
+ *
+ * - Missing bundles:
+ *     Check bundle registry logs at startup and verify paths.json entries.
+ *     Ensure `_Tbundles()` is awaited.
+ *
+ * - Slow watch rebuilds:
+ *     Ensure minification and sourcemaps are disabled in watch mode.
+ *
+ * - Firefox not closing on exit (Windows):
+ *     Ensure taskkill is used instead of relying on SIGTERM alone.
+ *
+ * =============================================================================
  */
 
 //---------------------------------------------------------------------------
@@ -306,13 +460,13 @@ function importBundles() {
  * once when Gulp loads the file.
  *
  * We keep a small amount of global state to coordinate:
- * - Build context (`__context`): target (chrome|firefox), env (dev|prod), watchMode…
+ * - Build context (`__context`): target (chrome|firefox), env (dev|prod), watchModeï¿½
  * - Resolved paths/options (`__paths`, `__options`): loaded from config/*.json with ${...} interpolation
  * - Bundle registry (`__bundles`): derived from paths.json and validated at startup
  * - Watch/runtime handles (`__watcher`, `__bundlers`): used to close watchers and child processes cleanly
  *
  * Onboarding note:
- * - If something “happens too early”, it is often because it runs at module load time.
+ * - If something ï¿½happens too earlyï¿½, it is often because it runs at module load time.
  * - Prefer explicit task sequencing (gulp.series / promises) for anything asynchronous.
  * -----------------------------------------------------------------------------
  */
@@ -686,7 +840,14 @@ function doDeployManifest() {
 function doDeployAssets(_asset) {
   return deploy(`/assets/${_asset}/**/*`, `/assets/${_asset}`);
 }
-
+/**
+ * doDeployStaticStyles is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployStaticStyles() {
   return deploy(__paths.staticStyles.source, __paths.staticStyles.target);
 }
