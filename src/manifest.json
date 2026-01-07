@@ -1,21 +1,12 @@
 {
 	"manifest_version": 2,
 	"name": "Nmind Companion",
-	"version": "1.0.0",
-	"description": "Nmond companion boilerplate",
+	"version": "1.1.0",
+	"description": "Nmind companion boilerplate",
 	"homepage_url": "https://nmind.io/companion",
 	"default_locale": "fr", 
 	"icons": {
 		"48": "assets/icons/addon-48x48.png"
-	},
-	"web_accessible_resources": [
-		"public/*",
-		"bundles/public.js"
-	],
-	"background": {
-		"scripts": [
-			"bundles/background.js"
-		]
 	},
 	"content_scripts": [
 		{
@@ -30,30 +21,8 @@
 			"run_at": "document_idle"
 		}
 	],
-	"browser_action": {
-		"browser_style": true,
-		"default_title": "Nmind Companion",
-		"default_popup": "popup/popup.html",
-		"default_icon": {
-			"48": "assets/icons/addon-48x48.png"
-		}
-	},
 	"options_ui": {
 		"page": "settings/settings.html",
 		"open_in_tab": false
-	},
-	"content_security_policy": "script-src 'self'; object-src 'self'",
-	"permissions": [
-		"https://nmind.io/companion",
-		"*://localhost/*",
-		"clipboardRead",
-		"clipboardWrite",
-		"contextMenus",
-		"downloads",
-		"downloads.open",
-		"tabs",
-		"notifications",
-		"nativeMessaging",
-		"storage"
-	]
+	}
 }

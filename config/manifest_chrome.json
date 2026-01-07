@@ -1,5 +1,39 @@
 {
-    "options_ui": {
-		"chrome_style": true
-	}
+	"manifest_version": 3,
+	"web_accessible_resources": [
+		{
+			"resources": [
+				"public/*",
+				"bundles/public.js"
+			],
+			"matches": [
+				"*://*/*"
+			]
+		}
+	],
+	"background": {
+		"service_worker": "bundles/background.js"
+	},
+	"action": {
+		"browser_style": true,
+		"default_title": "Nmind Companion",
+		"default_popup": "popup/popup.html",
+		"default_icon": {
+			"48": "assets/icons/addon-48x48.png"
+		}
+	},
+	"content_security_policy": {
+		"script-src": "self",
+		"object-src": "self"
+	},
+	"permissions": [
+		"downloads",
+		"downloads.open",
+		"nativeMessaging",
+		"storage"
+	],
+	"host_permissions": [
+		"https://nmind.io/companion",
+		"*://localhost/*"
+	]
 }

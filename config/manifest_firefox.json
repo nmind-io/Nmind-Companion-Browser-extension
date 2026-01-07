@@ -1,12 +1,38 @@
 {
+	"web_accessible_resources": [
+		"public/*",
+		"bundles/public.js"
+	],
+	"background": {
+		"scripts": [
+			"bundles/background.js"
+		]
+	},
+	"browser_action": {
+		"browser_style": true,
+		"default_title": "AquaO Companion",
+		"default_popup": "popup/popup.html",
+		"default_icon": {
+			"48": "assets/icons/addon-48x48.png"
+		}
+	},
+	"options_ui": {
+		"browser_style": true
+	},
+	"content_security_policy": "script-src 'self'; object-src 'self'",
+	"permissions": [
+		"downloads",
+		"downloads.open",
+		"nativeMessaging",
+		"storage",
+		"https://nmind.io/companion",
+		"*://localhost/*"
+	],
 	"browser_specific_settings": {
 		"gecko": {
 			"id": "nmind-companion@nmind.io",
 			"strict_min_version": "50",
 			"update_url": "https://nmind.io/companion/updates.json"
 		}
-	},
-	"options_ui": {
-		"browser_style": true
 	}
 }
