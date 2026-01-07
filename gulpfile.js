@@ -1,5 +1,28 @@
 'use strict';
 
+/**
+ * Nmind Companion Browser Extension - Gulp build system
+ *
+ * This gulpfile drives the full local developer workflow and release packaging:
+ * - Clean: remove build artifacts under `build/<target>`
+ * - Build: copy static assets + compile styles/scripts + generate browserify bundles
+ * - Watch: incremental rebuilds + optional Firefox runner (web-ext) for rapid feedback
+ * - Package: create a `.xpi` (Firefox) or `.zip` (Chrome) release artifact
+ *
+ * Key concepts
+ * - TARGET: browser target, must be `chrome` or `firefox`. Used for output path and manifest overlay.
+ * - __context: immutable run context (env, target, flags). Treat as source of truth.
+ * - __paths: path map loaded from `config/paths.json` with `${...}` placeholders expanded.
+ * - __options: toolchain options loaded from `config/options.json` (browserify/babelify/terser/runner).
+ * - __bundles: validated bundle config (`entry`, `watch`, `bundle`, `target`) loaded from paths.json.
+ * - __watcher: registry of active file watchers and runner process so shutdown is graceful.
+ *
+ * Notes on reliability
+ * - Bundles are built via Browserify + Babelify. Each bundler gets its own `cache/packageCache`.
+ * - `_Tbundles()` awaits bundle stream completion to prevent gulp from finishing early.
+ * - Windows runner shutdown may require killing a process tree (taskkill), especially when using `npx`.
+ */
+
 //---------------------------------------------------------------------------
 //#region Libraries
 //
@@ -63,6 +86,21 @@ const $ = {
 //#region Configuration & context
 //
 
+/**
+ * Resolves template placeholders inside JSON configuration values.
+ * This is used as the `reviver` argument of `JSON.parse()` when loading `config/paths.json`
+ * and `config/options.json`.
+ *
+ * It supports placeholders like `${__paths.target}` / `${__context.isDevelopment}` / `${__options.*}`.
+ * Only string values are processed; non-strings are returned unchanged.
+ *
+ * If a placeholder cannot be resolved, the function logs an error and returns the original value
+ * (unresolved), so downstream validations should catch missing/invalid config.
+ *
+ * @param {any} key Parameter (see description above / inline comments).
+ * @param {any} value Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function reviveImport(key, value) {
 
   if (typeof value !== "string") {
@@ -126,6 +164,17 @@ function reviveImport(key, value) {
   return value;
 }
 
+/**
+ * Loads an environment JSON file (e.g. `config/development.json`) and returns:
+ * - `whole`: the base object with per-target sections removed
+ * - `specs`: the object section for the requested target (`chrome` or `firefox`)
+ *
+ * This lets `createContext()` merge common settings with target-specific overrides.
+ *
+ * @param {any} path Parameter (see description above / inline comments).
+ * @param {any} target Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function parseSpecs(path, target) {
   const whole = JSON.parse($.node.fs.readFileSync(path));
   const specs = whole[target];
@@ -136,6 +185,19 @@ function parseSpecs(path, target) {
   return { whole, specs };
 }
 
+/**
+ * Builds the immutable build context (`__context`) for the current gulp run.
+ *
+ * Responsibilities:
+ * - read and validate `NODE_ENV` and `TARGET`
+ * - load the matching env config file (`config/<NODE_ENV>.json`) and merge target overrides
+ * - expose convenience booleans (`isDevelopment`, `isProduction`, `isChrome`, `isFirefox`)
+ * - expose runtime info used throughout the pipeline (cwd, watchMode flag)
+ *
+ * This function is intentionally called once at module load so all tasks share a single source of truth.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function createContext() {
   const environment = $.node.process.env.NODE_ENV || 'development';
   const target = ($.node.process.env.TARGET ?? 'firefox').toString().trim().toLowerCase();
@@ -162,6 +224,12 @@ function createContext() {
   );
 }
 
+/**
+ * Loads `config/paths.json` into `__paths` and expands `${...}` placeholders via `reviveImport`.
+ * The resulting object becomes the canonical path map used by build, watch and package steps.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function importPaths() {
   __paths = merge(
     __paths, 
@@ -169,6 +237,12 @@ function importPaths() {
   );
 }
 
+/**
+ * Loads `config/options.json` into `__options` and expands `${...}` placeholders via `reviveImport`.
+ * Options include browserify/babelify/terser settings and web-ext runner settings.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function importOptions() {
   __options = merge(
     __options, 
@@ -176,6 +250,18 @@ function importOptions() {
   );
 }
 
+/**
+ * Validates and materializes the bundle configuration defined in `paths.json` (`__paths.bundles`).
+ *
+ * Validation goals:
+ * - every bundle must have a single `entry` file (no globbing)
+ * - optional `watch` globs must be present to support extra triggers beyond watchify
+ * - `bundle` (output path relative to target) and `target` (output root) must be defined
+ *
+ * On success, assigns `__bundles` used by `doBuildBundle()` and `_Tbundles()`.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function importBundles() {
 
   const names = Object.keys(__paths.bundles || {}).sort();
@@ -247,6 +333,15 @@ importBundles();
 //#region Helpers
 //
 
+/**
+ * Maps a source file path under `__paths.src` to the corresponding path under `__paths.target`.
+ *
+ * Used mainly by watch handlers to delete the generated output file when a source file is removed.
+ * Normalizes path separators to forward slashes so glob/watch paths behave consistently on Windows.
+ *
+ * @param {any} path Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function resolveInTarget(path) {
   path = $.node.path.normalize(path).replace(/\\/g, '/');
 
@@ -257,6 +352,20 @@ function resolveInTarget(path) {
   return path.replace(__paths.src, __paths.target);
 }
 
+/**
+ * Copies files from the source tree to the build tree.
+ *
+ * This is a *copy-only* step (no transforms): it takes an input glob (relative to `src/`)
+ * and writes the matched files to the corresponding folder under `build/<target>/`.
+ *
+ * Typical uses: assets, locales, static HTML, vendor libs, etc.
+ *
+ * Returns a gulp stream so it can be composed in `gulp.series/parallel`.
+ *
+ * @param {any} _in Parameter (see description above / inline comments).
+ * @param {any} _out Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function deploy(_in, _out) {
   _in = `${__paths.src}${_in}`
   _out = `${__paths.target}${_out}`;
@@ -270,8 +379,21 @@ function deploy(_in, _out) {
     .pipe($.gulp.dest(_out));
 }
 
+/**
+ * Creates an event handler for chokidar/gulp watch events that keeps a folder in `build/<target>` in sync
+ * with its counterpart in `src/`.
+ *
+ * Design:
+ * - on `add` / `change`: copy only the touched file (incremental, fast)
+ * - on `unlink` / `unlinkDir`: delete the corresponding output path using `del`
+ *
+ * This avoids expensive `cleanDest` runs on every change and keeps watch-mode responsive.
+ *
+ * @param {any} _in Parameter (see description above / inline comments).
+ * @param {any} _out Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function sync(_in, _out) {
-  // _in et _out sont relatifs à src/target (ex: "/assets/x")
   const srcRoot = $.node.path.resolve($.node.process.cwd(), `${__paths.src}${_in}`);
   const outRoot = $.node.path.resolve($.node.process.cwd(), `${__paths.target}${_out}`);
 
@@ -318,10 +440,29 @@ function sync(_in, _out) {
 */
 }
 
+/**
+ * Thin wrapper around `fancy-log` so the entire gulpfile uses a single logging function.
+ * This makes it easy to later add prefixes (target/env), timestamps, or log levels in one place.
+ *
+ * @param {any} message Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function log(message) {
   $.utils.log(message);
 }
 
+/**
+ * Deep-merges plain objects into a new destination object.
+ *
+ * Used to combine:
+ * - base config + target overrides
+ * - default `__paths` with `paths.json`
+ * - default `__options` with `options.json`
+ *
+ * This helper is intentionally small and dependency-free to keep the build toolchain stable.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function merge() {
 
   const dst = {}, args = [].splice.call(arguments, 0);
@@ -345,6 +486,18 @@ function merge() {
   return dst;
 }
 
+/**
+ * Fail-fast guard used before reading required files from disk.
+ *
+ * Primary use: validate `config/manifest_<target>.json` exists before attempting to merge it into
+ * `src/manifest.json`.
+ *
+ * Throws an Error with an actionable message when a file is missing.
+ *
+ * @param {any} filePath Parameter (see description above / inline comments).
+ * @param {any} description Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function assertFileExists(filePath, description) {
   if (!$.node.fs.existsSync(filePath)) {
     throw new Error(
@@ -356,22 +509,47 @@ function assertFileExists(filePath, description) {
   }
 }
 
+/**
+ * Converts an arbitrary string (extension name/version) into a filesystem-safe slug.
+ *
+ * Used when generating package artifact names to avoid:
+ * - spaces / unicode / accents
+ * - Windows-reserved characters (`<>:"/\|?*`)
+ * - leading/trailing punctuation
+ *
+ * Guarantees a non-empty, bounded-length result.
+ *
+ * @param {any} input Parameter (see description above / inline comments).
+ * @param {any} maxLen = 80 Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function sanitizeFilenamePart(input, maxLen = 80) {
   const s = String(input ?? '')
-    .normalize('NFKD')                 // sépare accents
-    .replace(/[\u0300-\u036f]/g, '')   // supprime accents
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase()
-    .replace(/['"]/g, '')             // retire quotes
-    .replace(/[^a-z0-9._-]+/g, '-')    // tout le reste -> -
-    .replace(/-+/g, '-')              // compresse
-    .replace(/^[-.]+|[-.]+$/g, '');   // pas de - ou . en bord
+    .replace(/['"]/g, '')
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '');
 
-  // éviter les noms vides + limiter la longueur
   const safe = s.length ? s : 'extension';
   return safe.slice(0, maxLen);
 }
 
+/**
+ * Converts a gulp/vinyl stream into a Promise that resolves when writing has completed.
+ *
+ * Why this exists:
+ * Browserify pipelines can appear to 'finish' early when composed with `merge-stream`.
+ * By awaiting `finish/end`, `_Tbundles()` ensures gulp does not complete the build before all bundles
+ * have been fully written to disk.
+ *
+ * @param {any} stream Parameter (see description above / inline comments).
+ * @param {any} name Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function streamToPromise(stream, name) {
   return new Promise((resolve, reject) => {
     if (!stream || typeof stream.on !== 'function') {
@@ -432,11 +610,32 @@ $.node.process.on('SIGINT', function () {
 //---------------------------------------------------------------------------
 //#region Build and deploy
 //
+/**
+ * Deletes build output folders/files using `del`.
+ *
+ * Default behavior: remove the entire build target directory (`build/<target>`).
+ * Called at the start of `build` and also by watch handlers when files are deleted.
+ *
+ * @param {any} path Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doClean(path) {
     const targetPath = path || __paths.target;
     return $.del([targetPath], { force: true });
 }
 
+/**
+ * Builds the final `manifest.json` for the current TARGET.
+ *
+ * Process:
+ * 1) validate `config/manifest_<target>.json` exists
+ * 2) read that file and merge it into the base `src/manifest.json`
+ * 3) write the merged manifest into `build/<target>/manifest.json`
+ *
+ * This keeps shared manifest fields in one place while allowing per-browser differences.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployManifest() {
 
   const targetManifestPath = `${__paths.config}/manifest_${__context.target}.json`;
@@ -453,6 +652,15 @@ function doDeployManifest() {
     .pipe($.gulp.dest(__paths.target));
 }
 
+/**
+ * doDeployAssets is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} _asset Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployAssets(_asset) {
   return deploy(`/assets/${_asset}/**/*`, `/assets/${_asset}`);
 }
@@ -461,26 +669,78 @@ function doDeployStaticStyles() {
   return deploy(__paths.staticStyles.source, __paths.staticStyles.target);
 }
 
+/**
+ * doDeployLocales is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployLocales() {
   return deploy(__paths.locales.source, __paths.locales.target);
 }
 
+/**
+ * doDeployPublic is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployPublic() {
   return deploy(__paths.publicFile.source, __paths.publicFile.target);
 }
 
+/**
+ * doDeployHtml is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployHtml() {
   return deploy(__paths.staticHtml.source, __paths.staticHtml.target);
 }
 
+/**
+ * doDeployStaticLib is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doDeployStaticLib() {
   return deploy(__paths.staticLib.source, __paths.staticLib.target);
 }
 
+/**
+ * handleBuildStreamError is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} error Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function handleBuildStreamError(error) {
   log(`Build error: ${error && (error.stack || error.message || error)}`);
 }
 
+/**
+ * Compiles stylesheet sources (SCSS and LESS) into CSS under the build directory.
+ *
+ * Key behaviors:
+ * - uses `gulp-changed` with `.css` extension to avoid unnecessary recompiles
+ * - generates sourcemaps only in development
+ * - runs autoprefixer via PostCSS in production (and skips it in watch mode if configured)
+ * - writes output to `__paths.styles.target` in `build/<target>`
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doBuildStyles() {
   const _out = __paths.styles.target;
   const _sources = __paths.styles.source;
@@ -511,6 +771,18 @@ function doBuildStyles() {
     .pipe($.gulp.dest(_out));
 }
 
+/**
+ * Transpiles source scripts (JS/JSX/TS/TSX) into the build directory.
+ *
+ * Key behaviors:
+ * - uses `gulp-babel` with `__options.babel` (NOT `babelify`) because gulp-babel uses Babel core options
+ * - normalizes output extensions: `.jsx/.ts/.tsx` => `.js` to match manifest/HTML references
+ * - uses terser only for production builds outside watch mode
+ * - writes sourcemaps only in development
+ * - uses `gulp-changed` with `.js` extension so incremental builds work despite renaming
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doBuildScripts() {
   const _out = __paths.scripts.target;
   const _sources = __paths.scripts.source;
@@ -537,6 +809,22 @@ function doBuildScripts() {
     .pipe($.gulp.dest(_out));
 }
 
+/**
+ * Builds a single Browserify bundle for the given bundle key.
+ *
+ * Pipeline:
+ * - Browserify is configured with per-bundle `cache/packageCache` to prevent cross-bundle interference
+ * - Babelify transforms the dependency graph (supports JS/JSX/TS/TSX via options.json)
+ * - In production non-watch builds, the resulting bundle is minified with terser
+ * - Output is written under `build/<target>/` (typically `build/<target>/bundles/*.js`)
+ *
+ * Watch mode:
+ * - Watchify plugin is enabled for fast incremental rebundles when dependencies change
+ * - Additional glob watchers (`bundleConfig.watch`) can trigger rebuilds for non-imported resources
+ *
+ * @param {any} bundleName Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doBuildBundle(bundleName) {
 
   const bundleConfig = __bundles[bundleName];
@@ -600,6 +888,14 @@ function doBuildBundle(bundleName) {
 //#region Watch and sync
 //
 
+/**
+ * doWatchKeypress is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchKeypress(){
 
   $.node.process.stdin.on('keypress', (str, key) => {
@@ -615,6 +911,14 @@ function doWatchKeypress(){
 
 }
 
+/**
+ * doWatchManifest is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchManifest() {
   // Prevent deletion
   const options = Object.assign({}, __watcher.options, { events: ['change'] });
@@ -629,6 +933,17 @@ function doWatchManifest() {
   __watcher.workers.push(watcher);
 }
 
+/**
+ * Starts the Firefox development runner using `web-ext run` via `npx` (spawned child process).
+ *
+ * This approach is used instead of the web-ext JS API because the CLI is more resilient on Windows
+ * (retries debugger port, stable stdout/stderr).
+ *
+ * The spawned ChildProcess is stored in `__watcher.runnerProcess` so it can be terminated during cleanup.
+ *
+ * @param {any} resolver Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchWebext(resolver) {
 
   if (!__context.runner.enable) {
@@ -677,30 +992,87 @@ function doWatchWebext(resolver) {
   resolver();
 }
 
+/**
+ * doWatchAssets is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} _asset Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchAssets(_asset) {
   doWatchSync(`/assets/${_asset}/**/*`, `/assets/${_asset}`);
 }
 
+/**
+ * doWatchStaticStyles is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchStaticStyles() {
   doWatchDeploy(__paths.staticStyles.source, __paths.staticStyles.target);
 }
 
+/**
+ * doWatchLocales is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchLocales() {
   doWatchSync(__paths.locales.source, __paths.locales.target);
 }
 
+/**
+ * doWatchPublic is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchPublic() {
   doWatchSync(__paths.publicFile.source, __paths.publicFile.target);
 }
 
+/**
+ * doWatchHtml is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchHtml() {
   doWatchDeploy(__paths.staticHtml.source, __paths.staticHtml.target);
 }
 
+/**
+ * doWatchStaticLib is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchStaticLib() {
   doWatchSync(__paths.staticLib.source, __paths.staticLib.target);
 }
 
+/**
+ * doWatchStyles is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchStyles() {
 
   const options = Object.assign({}, __watcher.options, { events: ['add', 'change', 'unlink'] });
@@ -726,6 +1098,14 @@ function doWatchStyles() {
 
 }
 
+/**
+ * doWatchScripts is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchScripts() {
 
   const watcher = $.gulp.watch(__paths.scripts.source, __watcher.options)
@@ -751,6 +1131,17 @@ function doWatchScripts() {
   __watcher.workers.push(watcher);
 }
 
+/**
+ * doWatchDeploy is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} _in Parameter (see description above / inline comments).
+ * @param {any} _out Parameter (see description above / inline comments).
+ * @param {any} _handler Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchDeploy(_in, _out, _handler) {
 
   if (!_handler) {
@@ -766,7 +1157,6 @@ function doWatchDeploy(_in, _out, _handler) {
 
         case 'unlink':
         case 'unlinkDir':
-          // supprimer côté build
           return doClean(resolveInTarget(path));
       }
 
@@ -787,6 +1177,17 @@ function doWatchDeploy(_in, _out, _handler) {
   __watcher.workers.push(watcher);
 }
 
+/**
+ * doWatchSync is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} _source Parameter (see description above / inline comments).
+ * @param {any} _in Parameter (see description above / inline comments).
+ * @param {any} _out Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function doWatchSync(_source, _in, _out) {
   _out = _out || _in;
   const handler = sync(_in, _out);
@@ -807,11 +1208,29 @@ function doWatchSync(_source, _in, _out) {
   __watcher.workers.push(watcher);
 }
 
+/**
+ * watchEventLog is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} event Parameter (see description above / inline comments).
+ * @param {any} path Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function watchEventLog(event, path) {
   path = $.node.path.normalize(path).replace(/\\/g, '/');
   log(`Watch ${event} '${path}'`);
 }
 
+/**
+ * watchersCloseAll is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 async function watchersCloseAll() {
   await Promise.all(__watcher.workers.map(w => w.close()));
 }
@@ -820,18 +1239,51 @@ async function watchersCloseAll() {
 //---------------------------------------------------------------------------
 //#region Task : Build and deploy
 //
+/**
+ * _Tclean is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tclean() {
   return doClean();
 }
 
+/**
+ * _TprepareBuild is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} resolve Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _TprepareBuild(resolve) {
   resolve();
 }
 
+/**
+ * _Tmanifest is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tmanifest() {
   return doDeployManifest();
 }
 
+/**
+ * _Tassets is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 async function _Tassets() {
 
   const names = ['icons', 'images', 'public'];
@@ -840,30 +1292,86 @@ async function _Tassets() {
   await Promise.all(streams.map((s, i) => streamToPromise(s, `bundle:${names[i]}`)));
 }
 
+/**
+ * _Tlocales is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tlocales() {
   return doDeployLocales();
 }
 
+/**
+ * _Tpublic is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tpublic() {
   return doDeployPublic();
 }
 
+/**
+ * _Thtml is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Thtml() {
   return doDeployHtml();
 }
 
+/**
+ * _Tstyles is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tstyles() {
   return doBuildStyles();
 }
 
+/**
+ * _TstaticStyles is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _TstaticStyles() {
   return doDeployStaticStyles();
 }
 
+/**
+ * _Tscripts is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tscripts() {
   return doBuildScripts();
 }
 
+/**
+ * Gulp task that builds all bundles defined in `paths.json`.
+ *
+ * Uses `streamToPromise` + `Promise.all` to ensure gulp waits until every bundle stream has fully written
+ * its output files before marking the task as complete.
+ *
+ * @returns {Promise<void>} Return value (gulp stream / Promise / void depending on usage).
+ */
 async function _Tbundles() {
   const names = Object.keys(__bundles);
   const streams = names.map((n) => doBuildBundle(n));
@@ -871,6 +1379,14 @@ async function _Tbundles() {
   await Promise.all(streams.map((s, i) => streamToPromise(s, `bundle:${names[i]}`)));
 }
 
+/**
+ * _TstaticLib is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _TstaticLib() {
   return doDeployStaticLib();
 }
@@ -880,15 +1396,42 @@ function _TstaticLib() {
 //---------------------------------------------------------------------------
 //#region Task : Watch
 //
+/**
+ * _ThandleKeypress is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} resolve Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _ThandleKeypress(resolve){
   doWatchKeypress();
   resolve();
 }
 
+/**
+ * _Twebext is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} resolve Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Twebext(resolve) {
   doWatchWebext(resolve);
 }
 
+/**
+ * _Twatch is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} resolve Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Twatch(resolve) {
   __watcher.taskCallback = resolve;
 
@@ -906,6 +1449,15 @@ function _Twatch(resolve) {
   // Bundles already started in watchMode by _TprepareWatch and _Tbundles
 }
 
+/**
+ * _TprepareWatch is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @param {any} resolve Parameter (see description above / inline comments).
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _TprepareWatch(resolve) {
   __context.watchMode = true;
   resolve();
@@ -916,6 +1468,15 @@ function _TprepareWatch(resolve) {
 //---------------------------------------------------------------------------
 //#region Task : Package
 //
+/**
+ * Creates a distributable archive from `build/<target>`:
+ * - generates a sanitized filename from manifest name/version
+ * - excludes common junk files and, in production, sourcemaps
+ * - produces `.xpi` for Firefox and `.zip` for Chrome by default
+ * - writes artifacts under `dist/<target>/`
+ *
+ * @returns {any} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Tpackage() {
   const manifest = JSON.parse($.node.fs.readFileSync(`${__paths.target}/manifest.json`, 'utf8'));
   const extension = __context.isFirefox ? "xpi" : "zip";
@@ -946,6 +1507,18 @@ function _Tpackage() {
 //---------------------------------------------------------------------------
 //#region Series
 //
+/**
+ * Main build pipeline:
+ * 1) clean build directory
+ * 2) prepare build (context already initialized)
+ * 3) copy static assets + manifest + locales + html + libs (in parallel)
+ * 4) transpile non-bundled scripts
+ * 5) build browserify bundles
+ *
+ * Designed so the `build/<target>` folder is self-contained and ready for packaging or running.
+ *
+ * @returns {Function} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Sbuild() {
   return $.gulp.series(
     _Tclean,
@@ -965,6 +1538,17 @@ function _Sbuild() {
   );
 }
 
+/**
+ * Main watch pipeline:
+ * - enables watchMode
+ * - runs a full build once
+ * - starts file watchers for incremental updates
+ * - starts the web-ext runner (Firefox) to load the extension from `build/<target>`
+ *
+ * On exit (Ctrl+C), the pipeline attempts to close all watchers and terminate the runner cleanly.
+ *
+ * @returns {Function} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Swatch() {
   return $.gulp.series(
     _TprepareWatch,
@@ -977,6 +1561,14 @@ function _Swatch() {
   );
 }
 
+/**
+ * _Spackage is part of the gulp build system.
+ *
+ * This function is documented to help onboarding. Read the implementation for the exact behavior.
+ * Key things to check when modifying: side effects (FS/process/watchers), whether it returns a stream/Promise, and how errors are handled.
+ *
+ * @returns {Function} Return value (gulp stream / Promise / void depending on usage).
+ */
 function _Spackage() {
   return $.gulp.series(
     _Sbuild(),
