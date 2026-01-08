@@ -242,12 +242,12 @@ src/
   public/                # Support côté page web (ExtensionClient)
   lib/                   # Librairies tierces (jQuery, Bootstrap, polyfill)
   shared/
-    nmind-core.js        # browser, Logger, Storage...
-    nmind-misc.js
-    EventEmitter.js
-    LoggerWrapper.js
-    Storage.js
-    constants.js
+    nmind-core.ts        # browser, Logger, Storage...
+    nmind-misc.ts
+    EventEmitter.ts
+    LoggerWrapper.ts
+    Storage.ts
+    constants.ts
     nmind-messaging/     # Message, Endpoint, clients...
     nmind-services/      # Print/Download services
 ```

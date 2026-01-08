@@ -3,12 +3,15 @@
  * @author Nmind.io <osp@nmind.io>
  *
  */
-const { Logger, browser } = require('../shared/nmind-core');
+const core = require('../shared/nmind-core');
+const Logger = core.Logger;
+const browser = core.browser;
+
+const constants = require('../shared/constants');
+const URL_SETTINGS = constants.URL_SETTINGS;
+const DEFAULT_OPTIONS = constants.DEFAULT_OPTIONS;
+
 const { BackgroundClient } = require("../shared/nmind-messaging");
-const {
-    URL_SETTINGS,
-    DEFAULT_OPTIONS
-} = require('../shared/constants');
 
 const __client = new BackgroundClient();
 var __options = DEFAULT_OPTIONS;

@@ -51,7 +51,7 @@
     },
     "bundles": {
         "shared": {
-            "entry": "./src/shared/index.js",
+            "entry": "./src/shared/index.ts",
             "watch": [
                 "./src/shared/**/*.{js,jsx,ts,tsx}"
             ],

@@ -4,7 +4,11 @@
  *
  */
 
-const { Logger, browser, Storage } = require('../shared/nmind-core');
+const core = require('../shared/nmind-core');
+const Logger = core.Logger;
+const browser = core.browser;
+const Storage = core.Storage;
+
 const { TabListener, BackgroundClient } = require("../shared/nmind-messaging");
 
 if(Logger.isDebugMode) {
