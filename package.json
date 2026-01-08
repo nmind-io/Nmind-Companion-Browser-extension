@@ -39,6 +39,8 @@
     "@babel/preset-react": "^7.22",
     "@babel/preset-typescript": "^7.28.5",
     "@babel/register": "^7.28.3",
+    "@types/chrome": "^0.1.32",
+    "@types/node": "^25.0.3",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
     "autoprefixer": "^10.4.23",
