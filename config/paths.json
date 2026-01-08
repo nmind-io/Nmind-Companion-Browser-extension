@@ -59,7 +59,7 @@
             "target": "${__paths.target}"
         },
         "background": {
-            "entry": "./src/background/app.js",
+            "entry": "./src/background/app.ts",
             "watch": [
                 "./src/background/**/*.{js,jsx,ts,tsx}"
             ],
@@ -67,7 +67,7 @@
             "target": "${__paths.target}"
         },
         "content": {
-            "entry": "./src/content/page.js",
+            "entry": "./src/content/page.ts",
             "watch": [
                 "./src/content/**/*.{js,jsx,ts,tsx}"
             ],
@@ -75,7 +75,7 @@
             "target": "${__paths.target}"
         },
         "popup": {
-            "entry": "./src/popup/popup.js",
+            "entry": "./src/popup/popup.ts",
             "watch": [
                 "./src/popup/**/*.{js,jsx,ts,tsx}"
             ],
@@ -83,7 +83,7 @@
             "target": "${__paths.target}"
         },
         "settings": {
-            "entry": "./src/settings/settings.js",
+            "entry": "./src/settings/settings.ts",
             "watch": [
                 "./src/settings/**/*.{js,jsx,ts,tsx}"
             ],
@@ -91,7 +91,7 @@
             "target": "${__paths.target}"
         },
         "public": {
-            "entry": "./src/public/support.js",
+            "entry": "./src/public/support.ts",
             "watch": [
                 "./src/public/**/*.{js,jsx,ts,tsx}"
             ],
